@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
   Image,
   Modal,
@@ -45,7 +45,7 @@ interface ToolActivityGroupProps {
   engine?: ChatEngine | null;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
-  /** While the server reports an in-flight turn, surface live affordances (badge, auto-expand). */
+  /** While the server reports an in-flight turn, surface live affordances (badge, border). */
   liveTurnActive?: boolean;
 }
 
@@ -569,6 +569,12 @@ function areChatMessagePropsEqual(
 export const ChatMessage = memo(ChatMessageComponent, areChatMessagePropsEqual);
 ChatMessage.displayName = 'ChatMessage';
 
+const TOOL_GROUP_COLLAPSED_PREVIEW_COUNT = 2;
+const TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT = 300;
+const TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT_RATIO = 0.38;
+/** Detail bodies taller than this scroll inside the expanded card instead of stretching it. */
+const TOOL_GROUP_DETAIL_LINES_SCROLL_THRESHOLD = 24;
+
 export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
   messages,
   engine = null,
@@ -578,11 +584,13 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
 }: ToolActivityGroupProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const { height: windowHeight } = useWindowDimensions();
+  const expandedListMaxHeight = Math.min(
+    TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT,
+    Math.floor(windowHeight * TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT_RATIO)
+  );
   const [expanded, setExpanded] = useState(false);
   const [expandedEntryIds, setExpandedEntryIds] = useState<Record<string, boolean>>({});
-  const prevLiveSignatureRef = useRef<string | null>(null);
-  const sawLiveMountRef = useRef(false);
-  const userCollapsedLiveRef = useRef(false);
 
   const entries = useMemo(() => {
     const flattened: ToolGroupEntry[] = [];
@@ -608,43 +616,9 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
     return flattened.filter((entry) => entry.title.length > 0);
   }, [messages]);
 
-  const entriesSignature = useMemo(
-    () => entries.map((e) => `${e.id}:${e.title}`).join('\u241f'),
-    [entries]
-  );
-
-  useEffect(() => {
-    if (!liveTurnActive) {
-      prevLiveSignatureRef.current = entriesSignature;
-      sawLiveMountRef.current = false;
-      userCollapsedLiveRef.current = false;
-      return;
-    }
-
-    if (!sawLiveMountRef.current) {
-      sawLiveMountRef.current = true;
-      prevLiveSignatureRef.current = entriesSignature;
-      return;
-    }
-
-    if (
-      entriesSignature !== prevLiveSignatureRef.current &&
-      !userCollapsedLiveRef.current
-    ) {
-      setExpanded(true);
-    }
-    prevLiveSignatureRef.current = entriesSignature;
-  }, [liveTurnActive, entriesSignature]);
-
   const toggleExpanded = useCallback(() => {
-    setExpanded((previous) => {
-      const next = !previous;
-      if (liveTurnActive) {
-        userCollapsedLiveRef.current = next ? false : true;
-      }
-      return next;
-    });
-  }, [liveTurnActive]);
+    setExpanded((previous) => !previous);
+  }, []);
 
   if (entries.length === 0) {
     return null;
@@ -670,46 +644,15 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
     );
   }
 
-  const previewEntries = expanded ? entries : entries.slice(0, 3);
+  const previewEntries = expanded
+    ? entries
+    : entries.slice(0, TOOL_GROUP_COLLAPSED_PREVIEW_COUNT);
   const hiddenCount = Math.max(entries.length - previewEntries.length, 0);
   const summary = summarizeToolGroup(entries.map((entry) => entry.title));
 
-  return (
-    <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
-      <View style={[styles.toolGroupCard, liveTurnActive && styles.toolGroupCardLive]}>
-        <View style={styles.toolGroupEyebrowRow}>
-          <View style={styles.toolGroupEyebrowLeft}>
-            <Ionicons name="hardware-chip-outline" size={12} color={theme.colors.textMuted} />
-            <Text style={styles.toolGroupEyebrowText}>Tools</Text>
-          </View>
-          {liveTurnActive ? (
-            <View style={styles.toolGroupLiveBadge}>
-              <View style={styles.toolGroupLiveDot} />
-              <Text style={styles.toolGroupLiveBadgeText}>Live</Text>
-            </View>
-          ) : null}
-        </View>
-        <Pressable
-          onPress={toggleExpanded}
-          style={({ pressed }) => [
-            styles.toolGroupHeaderPressable,
-            styles.toolGroupCardInteractive,
-            pressed && styles.toolGroupCardPressed,
-          ]}
-        >
-          <View style={styles.toolGroupHeader}>
-            <Ionicons name="chevron-expand-outline" size={14} color={theme.colors.textMuted} />
-            <Text style={styles.toolGroupTitle}>{summary}</Text>
-            <Ionicons
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={theme.colors.textMuted}
-            />
-          </View>
-        </Pressable>
-
-        <View style={styles.toolGroupList}>
-          {previewEntries.map((entry, entryIndex) => {
+  const listInner = (
+    <>
+      {previewEntries.map((entry, entryIndex) => {
             const detailPreview = toTimelineDetailPreview(
               entry,
               bridgeUrl,
@@ -739,11 +682,13 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
                     </Text>
                   </View>
                   {previewImage ? (
-                    <MarkdownImage
-                      key={`${entry.id}-preview-image`}
-                      source={previewImage.source}
-                      accessibilityLabel={previewImage.accessibilityLabel}
-                    />
+                    <View style={styles.toolGroupPreviewImageClip}>
+                      <MarkdownImage
+                        key={`${entry.id}-preview-image`}
+                        source={previewImage.source}
+                        accessibilityLabel={previewImage.accessibilityLabel}
+                      />
+                    </View>
                   ) : null}
                 </View>
               );
@@ -817,16 +762,38 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
                     />
                   ))}
                   {entryExpanded && hasDetails ? (
-                    <View style={styles.toolGroupEntryDetailWrap}>
-                      {textDetails.map((line, lineIndex) => (
-                        <SelectableMessageText
-                          key={`${entry.id}-line-${String(lineIndex)}`}
-                          style={styles.toolGroupEntryDetailLine}
-                        >
-                          {line}
-                        </SelectableMessageText>
-                      ))}
-                    </View>
+                    textDetails.length > TOOL_GROUP_DETAIL_LINES_SCROLL_THRESHOLD ? (
+                      <ScrollView
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator
+                        style={[styles.toolGroupEntryDetailScroll, styles.toolGroupEntryDetailWrapOffset]}
+                      >
+                        <View style={styles.toolGroupEntryDetailSurface}>
+                          {textDetails.map((line, lineIndex) => (
+                            <SelectableMessageText
+                              key={`${entry.id}-line-${String(lineIndex)}`}
+                              style={styles.toolGroupEntryDetailLine}
+                            >
+                              {line}
+                            </SelectableMessageText>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    ) : (
+                      <View
+                        style={[styles.toolGroupEntryDetailWrapOffset, styles.toolGroupEntryDetailSurface]}
+                      >
+                        {textDetails.map((line, lineIndex) => (
+                          <SelectableMessageText
+                            key={`${entry.id}-line-${String(lineIndex)}`}
+                            style={styles.toolGroupEntryDetailLine}
+                          >
+                            {line}
+                          </SelectableMessageText>
+                        ))}
+                      </View>
+                    )
                   ) : null}
                 </Pressable>
                 {entryIndex < previewEntries.length - 1 ? (
@@ -835,10 +802,59 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
               </Fragment>
             );
           })}
-          {!expanded && hiddenCount > 0 ? (
-            <Text style={styles.toolGroupMoreText}>{`+${String(hiddenCount)} more`}</Text>
+      {!expanded && hiddenCount > 0 ? (
+        <Text style={styles.toolGroupMoreText}>{`+${String(hiddenCount)} more`}</Text>
+      ) : null}
+    </>
+  );
+
+  return (
+    <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
+      <View style={[styles.toolGroupCard, liveTurnActive && styles.toolGroupCardLive]}>
+        <View style={styles.toolGroupEyebrowRow}>
+          <View style={styles.toolGroupEyebrowLeft}>
+            <Ionicons name="hardware-chip-outline" size={12} color={theme.colors.textMuted} />
+            <Text style={styles.toolGroupEyebrowText}>Tools</Text>
+          </View>
+          {liveTurnActive ? (
+            <View style={styles.toolGroupLiveBadge}>
+              <View style={styles.toolGroupLiveDot} />
+              <Text style={styles.toolGroupLiveBadgeText}>Live</Text>
+            </View>
           ) : null}
         </View>
+        <Pressable
+          onPress={toggleExpanded}
+          style={({ pressed }) => [
+            styles.toolGroupHeaderPressable,
+            styles.toolGroupCardInteractive,
+            pressed && styles.toolGroupCardPressed,
+          ]}
+        >
+          <View style={styles.toolGroupHeader}>
+            <Ionicons name="chevron-expand-outline" size={14} color={theme.colors.textMuted} />
+            <Text style={styles.toolGroupTitle}>{summary}</Text>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={theme.colors.textMuted}
+            />
+          </View>
+        </Pressable>
+
+        {expanded ? (
+          <ScrollView
+            style={{ maxHeight: expandedListMaxHeight }}
+            contentContainerStyle={styles.toolGroupListScrollContent}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <View style={styles.toolGroupList}>{listInner}</View>
+          </ScrollView>
+        ) : (
+          <View style={styles.toolGroupList}>{listInner}</View>
+        )}
       </View>
     </View>
   );
@@ -1827,6 +1843,16 @@ const createStyles = (theme: AppTheme) => {
     marginTop: theme.spacing.xs,
     gap: 4,
   },
+  toolGroupListScrollContent: {
+    flexGrow: 0,
+    paddingBottom: theme.spacing.xs,
+  },
+  toolGroupPreviewImageClip: {
+    maxHeight: 72,
+    overflow: 'hidden',
+    borderRadius: theme.radius.sm,
+    alignSelf: 'stretch',
+  },
   toolGroupRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1884,9 +1910,14 @@ const createStyles = (theme: AppTheme) => {
     marginTop: 2,
     paddingLeft: theme.spacing.lg + 2,
   },
-  toolGroupEntryDetailWrap: {
+  toolGroupEntryDetailScroll: {
+    maxHeight: 176,
+  },
+  toolGroupEntryDetailWrapOffset: {
     marginTop: theme.spacing.xs,
     marginLeft: theme.spacing.lg + 2,
+  },
+  toolGroupEntryDetailSurface: {
     paddingVertical: theme.spacing.xs,
     paddingHorizontal: theme.spacing.sm,
     gap: 2,

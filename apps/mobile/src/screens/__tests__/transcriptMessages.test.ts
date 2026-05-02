@@ -2,6 +2,7 @@ import type { ChatMessage } from '../../api/types';
 import {
   buildTranscriptDisplayItems,
   getVisibleTranscriptMessages,
+  MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP,
   syncVisibleSubAgentStatuses,
   type TranscriptDisplayItem,
 } from '../transcriptMessages';
@@ -198,6 +199,19 @@ describe('buildTranscriptDisplayItems', () => {
         messages: [messages[2]],
       },
     ]);
+  });
+
+  it('chunks very long consecutive tool runs into multiple tool groups', () => {
+    const toolMessages = Array.from({ length: MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP + 3 }, (_, index) =>
+      message(`t${String(index)}`, 'system', `• Tool ${String(index)}`, { systemKind: 'tool' })
+    );
+
+    const items = buildTranscriptDisplayItems(toolMessages);
+    const groups = items.filter((item): item is Extract<TranscriptDisplayItem, { kind: 'toolGroup' }> => item.kind === 'toolGroup');
+
+    expect(groups.length).toBe(2);
+    expect(groups[0]?.messages.length).toBe(MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP);
+    expect(groups[1]?.messages.length).toBe(3);
   });
 
   it('wraps a single tool message in a toolGroup for consistent UI', () => {

@@ -14,6 +14,9 @@ export type TranscriptDisplayItem =
     }
   | ToolTranscriptGroup;
 
+/** Keeps each tool card bounded so very long runs don’t dominate the transcript. */
+export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
+
 export function getVisibleTranscriptMessages(
   messages: ChatMessage[],
   showToolCalls: boolean
@@ -90,6 +93,9 @@ export function buildTranscriptDisplayItems(
     const isToolMessage = message.role === 'system' && message.systemKind === 'tool';
     if (isToolMessage) {
       toolBuffer.push(message);
+      if (toolBuffer.length >= MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP) {
+        flushToolBuffer();
+      }
       continue;
     }
 
