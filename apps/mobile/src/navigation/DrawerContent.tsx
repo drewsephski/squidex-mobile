@@ -1347,28 +1347,6 @@ export const DrawerContent = memo(function DrawerContentComponent({
                         chat.status === 'error' && styles.chatItemAccentError,
                       ]}
                     />
-                    <View
-                      style={[
-                        styles.chatIconTile,
-                        isSelected && styles.chatIconTileSelected,
-                        isRunning && styles.chatIconTileRunning,
-                        chat.status === 'error' && styles.chatIconTileError,
-                      ]}
-                    >
-                      <Ionicons
-                        name={getChatEngineIconName(chatEngine, isSubAgent)}
-                        size={13}
-                        color={
-                          chat.status === 'error'
-                            ? theme.colors.statusError
-                            : isRunning
-                              ? theme.colors.statusRunning
-                              : isSelected
-                                ? theme.colors.textPrimary
-                                : theme.colors.textMuted
-                        }
-                      />
-                    </View>
                     <View style={styles.chatItemContent}>
                       <View style={styles.chatItemTopRow}>
                         <Text
@@ -1670,25 +1648,6 @@ function getDrawerChatSubtitle(chat: ChatSummary): string | null {
   }
 
   return null;
-}
-
-function getChatEngineIconName(
-  engine: ChatEngine,
-  isSubAgent: boolean
-): ComponentProps<typeof Ionicons>['name'] {
-  if (isSubAgent) {
-    return 'git-branch-outline';
-  }
-
-  if (engine === 'cursor') {
-    return 'sparkles-outline';
-  }
-
-  if (engine === 'opencode') {
-    return 'terminal-outline';
-  }
-
-  return 'chatbubble-outline';
 }
 
 function formatCompactCount(value: number): string {
