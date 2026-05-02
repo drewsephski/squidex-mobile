@@ -1930,7 +1930,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
   },
   fileAdded: {
     ...theme.typography.mono,
-    color: theme.colors.statusSuccess,
+    color: theme.colors.statusComplete,
     fontSize: 12,
   },
   fileRemoved: {
@@ -2099,7 +2099,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     lineHeight: 17,
   },
   diffLinePrefixAdd: {
-    color: theme.colors.statusSuccess,
+    color: theme.colors.statusComplete,
   },
   diffLinePrefixRemove: {
     color: theme.colors.statusError,
