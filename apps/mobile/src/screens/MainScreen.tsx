@@ -19,7 +19,6 @@ import {
   ActivityIndicator,
   Dimensions,
   FlatList,
-  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   type KeyboardEvent,
@@ -162,6 +161,30 @@ interface ActivePlanState {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface IdleTaskHandle {
+  cancel: () => void;
+}
+
+function scheduleIdleTask(task: () => void, timeout = 500): IdleTaskHandle {
+  if (typeof globalThis.requestIdleCallback === 'function') {
+    const handle = globalThis.requestIdleCallback(task, { timeout });
+    return {
+      cancel: () => {
+        if (typeof globalThis.cancelIdleCallback === 'function') {
+          globalThis.cancelIdleCallback(handle);
+        }
+      },
+    };
+  }
+
+  const timeoutId = setTimeout(task, 0);
+  return {
+    cancel: () => {
+      clearTimeout(timeoutId);
+    },
+  };
 }
 
 interface PendingPlanImplementationPrompt {
@@ -533,7 +556,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const { height: windowHeight } = useWindowDimensions();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const initialPendingSnapshot =
-      pendingOpenChatId && pendingOpenChatSnapshot?.id === pendingOpenChatId
+      pendingOpenChatId &&
+      pendingOpenChatSnapshot?.id === pendingOpenChatId &&
+      pendingOpenChatSnapshot.messages.length > 0
         ? pendingOpenChatSnapshot
         : null;
     const [selectedChat, setSelectedChat] = useState<Chat | null>(
@@ -686,7 +711,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const draftPersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const foregroundAgentRefreshHandleRef = useRef<{ cancel?: () => void } | null>(null);
+    const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);
     const [planPanelCollapsedByThread, setPlanPanelCollapsedByThread] = useState<
       Record<string, boolean>
     >({});
@@ -2675,7 +2700,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         setWorkspacePickerPurpose(purpose);
         setWorkspaceModalVisible(true);
         void browseWorkspacePath(initialPath);
-        InteractionManager.runAfterInteractions(() => {
+        scheduleIdleTask(() => {
           void refreshWorkspaceRoots();
         });
       },
@@ -2967,7 +2992,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
 
         clearForegroundAgentRefresh();
-        foregroundAgentRefreshHandleRef.current = InteractionManager.runAfterInteractions(() => {
+        foregroundAgentRefreshHandleRef.current = scheduleIdleTask(() => {
           foregroundAgentRefreshHandleRef.current = null;
           if (appStateRef.current !== 'active' || chatIdRef.current !== activeChatId) {
             return;
@@ -3574,7 +3599,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
       let cancelled = false;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      const idleHandle = scheduleIdleTask(() => {
         timeoutId = setTimeout(() => {
           if (cancelled) {
             return;
@@ -3605,7 +3630,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
       return () => {
         cancelled = true;
-        interactionHandle.cancel();
+        idleHandle.cancel();
         if (timeoutId !== null) {
           clearTimeout(timeoutId);
         }
@@ -3948,16 +3973,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       try {
         setRenaming(true);
         const updated = await api.renameChat(activeChatId, nextName);
-        setSelectedChat(
-          mergeChatWithPendingOptimisticMessages({
-            ...updated,
-            title: nextName,
-          })
-        );
-        setError(null);
-        setRenameModalVisible(false);
+        const renamedChat = mergeChatWithPendingOptimisticMessages({
+          ...updated,
+          title: nextName,
+        });
+        if (selectedChatIdRef.current === activeChatId) {
+          setSelectedChat((prev) =>
+            prev?.id === activeChatId ? resolveEquivalentChat(prev, renamedChat) : prev
+          );
+          setError(null);
+          setRenameModalVisible(false);
+        }
       } catch (err) {
-        setError((err as Error).message);
+        if (selectedChatIdRef.current === activeChatId) {
+          setError((err as Error).message);
+        }
       } finally {
         setRenaming(false);
       }
@@ -4479,6 +4509,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           setSelectedCollaborationMode('plan');
           if (!selectedChatId) {
             let createdChatId: string | null = null;
+            let adoptedCreatedChat = false;
+            const isCreatedChatVisible = () =>
+              createdChatId
+                ? selectedChatIdRef.current === createdChatId ||
+                  (adoptedCreatedChat && selectedChatIdRef.current === null)
+                : selectedChatIdRef.current === null;
             const optimisticMessage: ChatTranscriptMessage = {
               id: `msg-${Date.now()}`,
               role: 'user',
@@ -4510,24 +4546,27 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               });
               createdChatId = created.id;
 
-              setSelectedChatId(created.id);
               queueOptimisticUserMessage(created.id, optimisticMessage, {
                 baseChat: created,
               });
-              setSelectedChat({
-                ...created,
-                status: 'running',
-                updatedAt: new Date().toISOString(),
-                statusUpdatedAt: new Date().toISOString(),
-                lastMessagePreview: argText.slice(0, 50),
-                messages: [...created.messages, optimisticMessage],
-              });
+              if (selectedChatIdRef.current === null) {
+                adoptedCreatedChat = true;
+                setSelectedChatId(created.id);
+                setSelectedChat({
+                  ...created,
+                  status: 'running',
+                  updatedAt: new Date().toISOString(),
+                  statusUpdatedAt: new Date().toISOString(),
+                  lastMessagePreview: argText.slice(0, 50),
+                  messages: [...created.messages, optimisticMessage],
+                });
 
-              setActivity({
-                tone: 'running',
-                title: 'Sending plan prompt',
-              });
-              bumpRunWatchdog();
+                setActivity({
+                  tone: 'running',
+                  title: 'Sending plan prompt',
+                });
+                bumpRunWatchdog();
+              }
 
               const updated = await api.sendChatMessage(created.id, {
                 content: argText,
@@ -4544,7 +4583,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 mergeChatWithPendingOptimisticMessages(updated);
               const autoEnabledPlan =
                 shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-              if (autoEnabledPlan) {
+              const isStillVisible = isCreatedChatVisible();
+              if (autoEnabledPlan && isStillVisible) {
                 setSelectedCollaborationMode('plan');
               }
               rememberChatModelPreference(
@@ -4553,24 +4593,30 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 selectedEffort ?? activeEffort,
                 activeServiceTier
               );
-              setSelectedChat(resolvedUpdated);
-              setError(null);
-              setActivity({
-                tone: 'complete',
-                title: 'Turn completed',
-                detail:
-                  autoEnabledPlan
-                    ? 'Plan mode enabled for the next turn'
-                    : undefined,
-              });
-              clearRunWatchdog();
+              if (isStillVisible) {
+                setSelectedChat(resolvedUpdated);
+                setError(null);
+                setActivity({
+                  tone: 'complete',
+                  title: 'Turn completed',
+                  detail:
+                    autoEnabledPlan
+                      ? 'Plan mode enabled for the next turn'
+                      : undefined,
+                });
+                clearRunWatchdog();
+              }
             } catch (err) {
               if (createdChatId) {
                 discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
               }
-              handleTurnFailure(err);
+              if (isCreatedChatVisible()) {
+                handleTurnFailure(err);
+              }
             } finally {
-              setCreating(false);
+              if (isCreatedChatVisible()) {
+                setCreating(false);
+              }
             }
             return true;
           }
@@ -4581,6 +4627,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             content: argText,
             createdAt: new Date().toISOString(),
           };
+          const targetChatId = selectedChatId;
 
           try {
             setSending(true);
@@ -4588,7 +4635,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             setStoppingTurn(false);
             stopRequestedRef.current = false;
             setActivePlan(null);
-            cacheThreadPlan(selectedChatId, null);
+            cacheThreadPlan(targetChatId, null);
             setPendingUserInputRequest(null);
             setUserInputDrafts({});
             setUserInputError(null);
@@ -4599,12 +4646,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             });
             bumpRunWatchdog();
             setDraft('');
-            queueOptimisticUserMessage(selectedChatId, optimisticMessage);
+            queueOptimisticUserMessage(targetChatId, optimisticMessage);
             setSelectedChat((prev) => {
               const baseChat =
-                selectedChat?.id === selectedChatId
+                selectedChat?.id === targetChatId
                   ? selectedChat
-                  : prev?.id === selectedChatId
+                  : prev?.id === targetChatId
                     ? prev
                     : prev;
               if (!baseChat) {
@@ -4624,7 +4671,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               };
             });
             scrollToBottomReliable(true);
-            const updated = await api.sendChatMessage(selectedChatId, {
+            const updated = await api.sendChatMessage(targetChatId, {
               content: argText,
               cwd: selectedChat?.cwd,
               model: activeModelId ?? undefined,
@@ -4633,28 +4680,34 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               approvalPolicy: activeApprovalPolicy,
               collaborationMode: 'plan',
             }, {
-              onTurnStarted: (turnId) => registerTurnStarted(selectedChatId, turnId),
+              onTurnStarted: (turnId) => registerTurnStarted(targetChatId, turnId),
             });
             const resolvedUpdated =
               mergeChatWithPendingOptimisticMessages(updated);
             rememberChatModelPreference(
-              selectedChatId,
+              targetChatId,
               activeModelId,
               selectedEffort ?? activeEffort,
               activeServiceTier
             );
-            setSelectedChat(resolvedUpdated);
-            setError(null);
-            setActivity({
-              tone: 'complete',
-              title: 'Turn completed',
-            });
-            clearRunWatchdog();
+            if (selectedChatIdRef.current === targetChatId) {
+              setSelectedChat(resolvedUpdated);
+              setError(null);
+              setActivity({
+                tone: 'complete',
+                title: 'Turn completed',
+              });
+              clearRunWatchdog();
+            }
           } catch (err) {
-            discardOptimisticUserMessage(selectedChatId, optimisticMessage.id);
-            handleTurnFailure(err);
+            discardOptimisticUserMessage(targetChatId, optimisticMessage.id);
+            if (selectedChatIdRef.current === targetChatId) {
+              handleTurnFailure(err);
+            }
           } finally {
-            setSending(false);
+            if (selectedChatIdRef.current === targetChatId) {
+              setSending(false);
+            }
           }
 
           return true;
@@ -4692,15 +4745,22 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           try {
             setRenaming(true);
             const updated = await api.renameChat(activeChatId, argText);
-            setSelectedChat(mergeChatWithPendingOptimisticMessages(updated));
-            setActivity({
-              tone: 'complete',
-              title: 'Chat renamed',
-              detail: updated.title,
-            });
-            setError(null);
+            const renamedChat = mergeChatWithPendingOptimisticMessages(updated);
+            if (selectedChatIdRef.current === activeChatId) {
+              setSelectedChat((prev) =>
+                prev?.id === activeChatId ? resolveEquivalentChat(prev, renamedChat) : prev
+              );
+              setActivity({
+                tone: 'complete',
+                title: 'Chat renamed',
+                detail: updated.title,
+              });
+              setError(null);
+            }
           } catch (err) {
-            setError((err as Error).message);
+            if (selectedChatIdRef.current === activeChatId) {
+              setError((err as Error).message);
+            }
           } finally {
             setRenaming(false);
           }
@@ -4773,6 +4833,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             setError('/fork requires an open chat');
             return true;
           }
+          const sourceChatId = selectedChatId;
 
           try {
             setCreating(true);
@@ -4786,6 +4847,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               serviceTier: activeServiceTier ?? undefined,
               approvalPolicy: activeApprovalPolicy,
             });
+            if (selectedChatIdRef.current !== sourceChatId) {
+              return true;
+            }
             setSelectedChatId(forked.id);
             rememberChatModelPreference(
               forked.id,
@@ -4800,14 +4864,18 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               title: 'Chat forked',
             });
           } catch (err) {
-            setError((err as Error).message);
-            setActivity({
-              tone: 'error',
-              title: 'Fork failed',
-              detail: (err as Error).message,
-            });
+            if (selectedChatIdRef.current === sourceChatId) {
+              setError((err as Error).message);
+              setActivity({
+                tone: 'error',
+                title: 'Fork failed',
+                detail: (err as Error).message,
+              });
+            }
           } finally {
-            setCreating(false);
+            if (selectedChatIdRef.current === sourceChatId) {
+              setCreating(false);
+            }
           }
           return true;
         }
@@ -5289,6 +5357,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       setDraft('');
 
       let createdChatId: string | null = null;
+      let adoptedCreatedChat = false;
+      const isCreatedChatVisible = () =>
+        createdChatId
+          ? selectedChatIdRef.current === createdChatId ||
+            (adoptedCreatedChat && selectedChatIdRef.current === null)
+          : selectedChatIdRef.current === null;
       try {
         setCreating(true);
         setActiveTurnId(null);
@@ -5313,25 +5387,28 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         });
         createdChatId = created.id;
 
-        setSelectedChatId(created.id);
         queueOptimisticUserMessage(created.id, optimisticMessage, {
           baseChat: created,
         });
-        setSelectedChat({
-          ...created,
-          status: 'running',
-          updatedAt: new Date().toISOString(),
-          statusUpdatedAt: new Date().toISOString(),
-          lastMessagePreview: content.slice(0, 50),
-          messages: [...created.messages, optimisticMessage],
-        });
-        scrollToBottomReliable(true);
+        if (selectedChatIdRef.current === null) {
+          adoptedCreatedChat = true;
+          setSelectedChatId(created.id);
+          setSelectedChat({
+            ...created,
+            status: 'running',
+            updatedAt: new Date().toISOString(),
+            statusUpdatedAt: new Date().toISOString(),
+            lastMessagePreview: content.slice(0, 50),
+            messages: [...created.messages, optimisticMessage],
+          });
+          scrollToBottomReliable(true);
 
-        setActivity({
-          tone: 'running',
-          title: 'Working',
-        });
-        bumpRunWatchdog();
+          setActivity({
+            tone: 'running',
+            title: 'Working',
+          });
+          bumpRunWatchdog();
+        }
 
         const updated = await api.sendChatMessage(
           created.id,
@@ -5354,7 +5431,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           mergeChatWithPendingOptimisticMessages(updated);
         const autoEnabledPlan =
           shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-        if (autoEnabledPlan) {
+        const isStillVisible = isCreatedChatVisible();
+        if (autoEnabledPlan && isStillVisible) {
           setSelectedCollaborationMode('plan');
         }
         rememberChatModelPreference(
@@ -5363,42 +5441,48 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           selectedEffort ?? activeEffort,
           activeServiceTier
         );
-        setSelectedChat(resolvedUpdated);
-        setPendingMentionPaths([]);
-        setPendingLocalImagePaths([]);
-        setError(null);
-        if (resolvedUpdated.status === 'complete') {
-          setActivity({
-            tone: 'complete',
-            title: 'Turn completed',
-            detail:
-              autoEnabledPlan && selectedCollaborationMode !== 'plan'
-                ? 'Plan mode enabled for the next turn'
-                : undefined,
-          });
-          clearRunWatchdog();
-        } else if (resolvedUpdated.status === 'error') {
-          setActivity({
-            tone: 'error',
-            title: 'Turn failed',
-            detail: resolvedUpdated.lastError ?? undefined,
-          });
-          clearRunWatchdog();
-        } else {
-          // 'running' or 'idle' (server may not have started yet) — keep working
-          setActivity({
-            tone: 'running',
-            title: 'Working',
-          });
-          bumpRunWatchdog();
+        if (isStillVisible) {
+          setSelectedChat(resolvedUpdated);
+          setPendingMentionPaths([]);
+          setPendingLocalImagePaths([]);
+          setError(null);
+          if (resolvedUpdated.status === 'complete') {
+            setActivity({
+              tone: 'complete',
+              title: 'Turn completed',
+              detail:
+                autoEnabledPlan && selectedCollaborationMode !== 'plan'
+                  ? 'Plan mode enabled for the next turn'
+                  : undefined,
+            });
+            clearRunWatchdog();
+          } else if (resolvedUpdated.status === 'error') {
+            setActivity({
+              tone: 'error',
+              title: 'Turn failed',
+              detail: resolvedUpdated.lastError ?? undefined,
+            });
+            clearRunWatchdog();
+          } else {
+            // 'running' or 'idle' (server may not have started yet) — keep working
+            setActivity({
+              tone: 'running',
+              title: 'Working',
+            });
+            bumpRunWatchdog();
+          }
         }
       } catch (err) {
         if (createdChatId) {
           discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
         }
-        handleTurnFailure(err);
+        if (isCreatedChatVisible()) {
+          handleTurnFailure(err);
+        }
       } finally {
-        setCreating(false);
+        if (isCreatedChatVisible()) {
+          setCreating(false);
+        }
       }
     }, [
       api,
@@ -5440,6 +5524,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         if (!selectedChatId || !content) {
           return false;
         }
+        const targetChatId = selectedChatId;
 
         const shouldClearComposer = options?.clearComposer ?? true;
         const shouldPreservePlan = options?.preservePlan ?? false;
@@ -5456,7 +5541,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           pendingMentionPaths.map((path) => toMentionInput(path, selectedChat?.cwd));
         const turnLocalImages =
           options?.localImages ?? pendingLocalImagePaths.map((path) => ({ path }));
-        const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[selectedChatId] ?? null;
+        const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[targetChatId] ?? null;
         const knownQueuedMessages = selectedThreadSnapshot?.queuedMessages ?? [];
         const likelyQueuesLocally =
           knownQueuedMessages.length > 0 ||
@@ -5481,21 +5566,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             } satisfies ChatTranscriptMessage)
           : null;
         const previousSelectedChatPreview =
-          selectedChatRef.current?.id === selectedChatId
+          selectedChatRef.current?.id === targetChatId
             ? selectedChatRef.current.lastMessagePreview
-            : selectedChat?.id === selectedChatId
+            : selectedChat?.id === targetChatId
               ? selectedChat.lastMessagePreview
               : null;
         const optimisticQueuedMessage = shouldShowOptimisticQueuedMessage
-          ? queueOptimisticQueuedMessage(selectedChatId, content)
+          ? queueOptimisticQueuedMessage(targetChatId, content)
           : null;
         const clearOptimisticSentMessage = () => {
           if (!optimisticSentMessage) {
             return;
           }
-          discardOptimisticUserMessage(selectedChatId, optimisticSentMessage.id);
+          discardOptimisticUserMessage(targetChatId, optimisticSentMessage.id);
           setSelectedChat((prev) => {
-            if (!prev || prev.id !== selectedChatId) {
+            if (!prev || prev.id !== targetChatId) {
               return prev;
             }
 
@@ -5531,12 +5616,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             setDraft('');
           }
           if (optimisticSentMessage) {
-            queueOptimisticUserMessage(selectedChatId, optimisticSentMessage);
+            queueOptimisticUserMessage(targetChatId, optimisticSentMessage);
             setSelectedChat((prev) => {
               const baseChat =
-                selectedChat?.id === selectedChatId
+                selectedChat?.id === targetChatId
                   ? selectedChat
-                  : prev?.id === selectedChatId
+                  : prev?.id === targetChatId
                     ? prev
                     : prev;
               if (!baseChat) {
@@ -5559,7 +5644,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           }
 
           const result = await api.sendOrQueueChatMessage(
-            selectedChatId,
+            targetChatId,
             {
               content,
               mentions: turnMentions,
@@ -5576,25 +5661,31 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             }
           );
 
-          discardOptimisticQueuedMessage(selectedChatId, optimisticQueuedMessage?.id);
-          cacheThreadQueueState(selectedChatId, result.queue);
+          discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
+          cacheThreadQueueState(targetChatId, result.queue);
           rememberChatModelPreference(
-            selectedChatId,
+            targetChatId,
             activeModelId,
             selectedEffort ?? activeEffort,
             activeServiceTier
           );
 
-          if (shouldClearComposer) {
+          const isStillSelectedForResult = selectedChatIdRef.current === targetChatId;
+          if (shouldClearComposer && isStillSelectedForResult) {
             setPendingMentionPaths([]);
             setPendingLocalImagePaths([]);
           }
 
-          setError(null);
+          if (isStillSelectedForResult) {
+            setError(null);
+          }
 
           if (result.disposition === 'queued') {
             clearOptimisticSentMessage();
-            if (!selectedChatRef.current || !isChatLikelyRunning(selectedChatRef.current)) {
+            if (
+              selectedChatIdRef.current === targetChatId &&
+              (!selectedChatRef.current || !isChatLikelyRunning(selectedChatRef.current))
+            ) {
               setActivity({
                 tone: 'idle',
                 title: 'Message queued',
@@ -5604,57 +5695,70 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             return true;
           }
 
-          registerTurnStarted(selectedChatId, result.turnId);
-          setStoppingTurn(false);
-          stopRequestedRef.current = false;
-          if (!shouldPreservePlan) {
-            setActivePlan(null);
-            cacheThreadPlan(selectedChatId, null);
+          registerTurnStarted(targetChatId, result.turnId);
+          const isStillSelected = selectedChatIdRef.current === targetChatId;
+          if (isStillSelected) {
+            setStoppingTurn(false);
+            stopRequestedRef.current = false;
           }
-          setPendingUserInputRequest(null);
-          setUserInputDrafts({});
-          setUserInputError(null);
-          setResolvingUserInput(false);
+          if (!shouldPreservePlan) {
+            if (isStillSelected) {
+              setActivePlan(null);
+            }
+            cacheThreadPlan(targetChatId, null);
+          }
+          if (isStillSelected) {
+            setPendingUserInputRequest(null);
+            setUserInputDrafts({});
+            setUserInputError(null);
+            setResolvingUserInput(false);
+          }
           const resolvedUpdated = mergeChatWithPendingOptimisticMessages(result.chat);
           const autoEnabledPlan =
             !options?.suppressPlanModeAutoEnable &&
             shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-          if (autoEnabledPlan) {
+          if (autoEnabledPlan && isStillSelected) {
             setSelectedCollaborationMode('plan');
           }
-          setSelectedChat(resolvedUpdated);
-          if (resolvedUpdated.status === 'complete') {
-            setActivity({
-              tone: 'complete',
-              title: 'Turn completed',
-              detail:
-                autoEnabledPlan && resolvedCollaborationMode !== 'plan'
-                  ? 'Plan mode enabled for the next turn'
-                  : undefined,
-            });
-            clearRunWatchdog();
-          } else if (resolvedUpdated.status === 'error') {
-            setActivity({
-              tone: 'error',
-              title: 'Turn failed',
-              detail: resolvedUpdated.lastError ?? undefined,
-            });
-            clearRunWatchdog();
-          } else {
-            // 'running' or 'idle' (server may not have started yet) — keep working
-            setActivity({
-              tone: 'running',
-              title: 'Working',
-            });
-            bumpRunWatchdog();
+          if (isStillSelected) {
+            setSelectedChat(resolvedUpdated);
+            if (resolvedUpdated.status === 'complete') {
+              setActivity({
+                tone: 'complete',
+                title: 'Turn completed',
+                detail:
+                  autoEnabledPlan && resolvedCollaborationMode !== 'plan'
+                    ? 'Plan mode enabled for the next turn'
+                    : undefined,
+              });
+              clearRunWatchdog();
+            } else if (resolvedUpdated.status === 'error') {
+              setActivity({
+                tone: 'error',
+                title: 'Turn failed',
+                detail: resolvedUpdated.lastError ?? undefined,
+              });
+              clearRunWatchdog();
+            } else {
+              // 'running' or 'idle' (server may not have started yet) — keep working
+              setActivity({
+                tone: 'running',
+                title: 'Working',
+              });
+              bumpRunWatchdog();
+            }
           }
         } catch (err) {
           clearOptimisticSentMessage();
-          discardOptimisticQueuedMessage(selectedChatId, optimisticQueuedMessage?.id);
-          handleTurnFailure(err);
+          discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
+          if (selectedChatIdRef.current === targetChatId) {
+            handleTurnFailure(err);
+          }
           return false;
         } finally {
-          setSending(false);
+          if (selectedChatIdRef.current === targetChatId) {
+            setSending(false);
+          }
         }
 
         return true;
@@ -8435,6 +8539,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             <KeyboardAvoidingView style={styles.keyboardAvoiding} enabled={false}>
               {selectedChat && !isOpeningChat ? (
                 <ChatView
+                  key={selectedChat.id}
                   chat={selectedChat}
                   parentChat={selectedParentChat}
                   bridgeUrl={bridgeUrl}
@@ -8486,6 +8591,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           >
             {selectedChat && !isOpeningChat ? (
               <ChatView
+                key={selectedChat.id}
                 chat={selectedChat}
                 parentChat={selectedParentChat}
                 bridgeUrl={bridgeUrl}

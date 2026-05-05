@@ -143,6 +143,7 @@ const DRAWER_SNAP_VELOCITY = 920;
 const DRAWER_VELOCITY_PROJECTION = 0.08;
 const DRAWER_RUBBER_BAND_STRENGTH = 0.2;
 const DRAWER_CONTENT_SCALE = 0.94;
+const CHAT_TRANSITION_MIN_MS = 220;
 const DRAWER_CONTENT_PARALLAX = 18;
 const DRAWER_MAX_RADIUS = 28;
 const DRAWER_MAX_SHADOW_OPACITY = 0.24;
@@ -923,14 +924,19 @@ export default function App() {
       const requestId = chatTransitionRequestIdRef.current + 1;
       chatTransitionRequestIdRef.current = requestId;
       const startedAt = Date.now();
-      setChatTransitionChatId(id);
-      setMainOpeningChatId(id);
-      closeDrawer();
 
       const nextSnapshot =
         snapshot && snapshot.id === id ? snapshot : api?.peekChatShell(id) ?? null;
+      const hasHydratedSnapshot = Boolean(nextSnapshot && nextSnapshot.messages.length > 0);
+      const shouldShowTransition = !hasHydratedSnapshot;
 
-      const remainingMs = 220 - (Date.now() - startedAt);
+      setChatTransitionChatId(shouldShowTransition ? id : null);
+      setMainOpeningChatId(shouldShowTransition ? id : null);
+      closeDrawer();
+
+      const remainingMs = shouldShowTransition
+        ? CHAT_TRANSITION_MIN_MS - (Date.now() - startedAt)
+        : 0;
       if (remainingMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, remainingMs));
       }
@@ -944,9 +950,9 @@ export default function App() {
       setGitChat(null);
       setCurrentScreen('Main');
       setPendingMainChatId(id);
-      setPendingMainChatSnapshot(nextSnapshot);
+      setPendingMainChatSnapshot(hasHydratedSnapshot ? nextSnapshot : null);
       setChatTransitionChatId(null);
-      if (nextSnapshot) {
+      if (hasHydratedSnapshot) {
         setMainOpeningChatId(null);
       }
     },
