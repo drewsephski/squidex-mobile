@@ -963,6 +963,23 @@ export function deriveCloneDirectoryName(url: string | null | undefined): string
   return normalizeCloneDirectoryName(candidate);
 }
 
+export function formatGitCloneFailureMessage(
+  result: {
+    code: number | null;
+    stdout: string;
+    stderr: string;
+    cloned: boolean;
+  },
+  fallbackLabel = 'repository'
+): string | null {
+  if (result.cloned && (result.code === null || result.code === 0)) {
+    return null;
+  }
+
+  const detail = (result.stderr || result.stdout).trim();
+  return detail.length > 0 ? detail : `Git clone failed for ${fallbackLabel}.`;
+}
+
 export function joinWorkspacePath(parentPath: string, child: string): string {
   const separator =
     parentPath.includes('\\') && !parentPath.includes('/') ? '\\' : '/';

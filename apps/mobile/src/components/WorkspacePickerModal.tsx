@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -72,6 +72,7 @@ export function WorkspacePickerModal({
   const [pendingSelectionPath, setPendingSelectionPath] = useState<string | null>(
     selectedPath ?? currentPath ?? bridgeRoot
   );
+  const wasVisibleRef = useRef(false);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const topInset = Math.max(insets.top + theme.spacing.lg, 72);
   const bottomInset = Math.max(insets.bottom + theme.spacing.lg, 72);
@@ -81,17 +82,28 @@ export function WorkspacePickerModal({
   );
 
   useEffect(() => {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+
     if (!visible) {
       setSearchQuery('');
-    }
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) {
       return;
     }
-    setPendingSelectionPath(selectedPath ?? currentPath ?? bridgeRoot);
+
+    if (!wasVisible) {
+      setPendingSelectionPath(selectedPath ?? currentPath ?? bridgeRoot);
+    }
   }, [bridgeRoot, currentPath, selectedPath, visible]);
+
+  useEffect(() => {
+    if (!visible || pendingSelectionPath !== null) {
+      return;
+    }
+    const fallbackPath = selectedPath ?? currentPath ?? bridgeRoot;
+    if (fallbackPath) {
+      setPendingSelectionPath(fallbackPath);
+    }
+  }, [bridgeRoot, currentPath, pendingSelectionPath, selectedPath, visible]);
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const favoritePathSet = useMemo(

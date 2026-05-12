@@ -55,6 +55,7 @@ import {
   type GitHubUser,
 } from '../githubCodespaces';
 import { useAppTheme, type AppTheme } from '../theme';
+import { formatGitCloneFailureMessage } from './mainScreenHelpers';
 
 interface GitHubCodespacesScreenProps {
   bridgeProfiles: BridgeProfile[];
@@ -1195,13 +1196,12 @@ export function GitHubCodespacesScreen({
               parentPath: null,
               directoryName: cloneRepository.name,
             });
-            if (!cloneResult.cloned || (cloneResult.code !== null && cloneResult.code !== 0)) {
-              const detail = (cloneResult.stderr || cloneResult.stdout).trim();
-              throw new Error(
-                detail.length > 0
-                  ? detail
-                  : `Git clone failed for ${cloneRepository.fullName}.`
-              );
+            const cloneFailureMessage = formatGitCloneFailureMessage(
+              cloneResult,
+              cloneRepository.fullName
+            );
+            if (cloneFailureMessage) {
+              throw new Error(cloneFailureMessage);
             }
           },
           { requestTimeoutMs: 5 * 60 * 1000 }

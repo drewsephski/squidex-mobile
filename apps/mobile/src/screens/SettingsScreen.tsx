@@ -137,7 +137,7 @@ type SettingsRoute =
   | 'account'
   | 'limits'
   | 'bridge'
-  | 'credentials'
+  | 'engines'
   | 'appearance'
   | 'tips'
   | 'legal';
@@ -239,6 +239,7 @@ export function SettingsScreen({
     useState<CursorCredentialStatus | null>(null);
   const [cursorCredentialsLoading, setCursorCredentialsLoading] = useState(false);
   const [cursorCredentialsError, setCursorCredentialsError] = useState<string | null>(null);
+  const [engineActionMessage, setEngineActionMessage] = useState<string | null>(null);
   const [bridgeRestartModalVisible, setBridgeRestartModalVisible] = useState(false);
   const [bridgeRestartActionError, setBridgeRestartActionError] = useState<string | null>(null);
   const [bridgeRestartStarting, setBridgeRestartStarting] = useState(false);
@@ -390,8 +391,8 @@ export function SettingsScreen({
           ? 'Codex Usage Limits'
           : route === 'bridge'
             ? 'Connections'
-            : route === 'credentials'
-              ? 'Credentials'
+            : route === 'engines'
+              ? 'Engines'
               : route === 'appearance'
                 ? 'Appearance'
                 : route === 'tips'
@@ -408,8 +409,8 @@ export function SettingsScreen({
           ? ('speedometer-outline' as const)
           : route === 'bridge'
             ? ('link-outline' as const)
-            : route === 'credentials'
-              ? ('key-outline' as const)
+            : route === 'engines'
+              ? ('hardware-chip-outline' as const)
               : route === 'appearance'
                 ? ('color-palette-outline' as const)
                 : route === 'tips'
@@ -424,7 +425,8 @@ export function SettingsScreen({
   const accountSummary = 'See sign-in status and plan';
   const usageLimitsSummary = 'View weekly usage and reset times';
   const bridgeSummary = 'Add GitHub Codespaces or private connections';
-  const credentialsSummary = formatCursorCredentialSummary(
+  const enginesSummary = formatEnginesSummary(
+    runtimeAvailableEngines,
     cursorCredentials,
     cursorCredentialsLoading
   );
@@ -441,7 +443,7 @@ export function SettingsScreen({
   const shouldLoadAccountSettings = route === 'account';
   const shouldLoadLimitsSettings = route === 'limits';
   const shouldLoadBridgeSettings = route === 'bridge';
-  const shouldLoadCredentialsSettings = route === 'credentials';
+  const shouldLoadEngineSettings = route === 'engines';
 
   useEffect(() => {
     onDrawerGestureEnabledChange?.(route === 'home');
@@ -612,7 +614,7 @@ export function SettingsScreen({
         void loadBridgeCapabilities();
         void loadBridgeRuntime();
       }
-      if (shouldLoadCredentialsSettings) {
+      if (shouldLoadEngineSettings) {
         void loadBridgeCapabilities();
         void loadCursorCredentials();
       }
@@ -639,7 +641,7 @@ export function SettingsScreen({
     shouldLoadAccountSettings,
     shouldLoadBridgeSettings,
     shouldLoadChatSettings,
-    shouldLoadCredentialsSettings,
+    shouldLoadEngineSettings,
     shouldLoadLimitsSettings,
   ]);
 
@@ -653,7 +655,7 @@ export function SettingsScreen({
             void loadBridgeCapabilities();
             void loadBridgeRuntime();
           }
-          if (shouldLoadCredentialsSettings) {
+          if (shouldLoadEngineSettings) {
             void loadBridgeCapabilities();
             void loadCursorCredentials();
           }
@@ -680,7 +682,7 @@ export function SettingsScreen({
       shouldLoadAccountSettings,
       shouldLoadBridgeSettings,
       shouldLoadChatSettings,
-      shouldLoadCredentialsSettings,
+      shouldLoadEngineSettings,
       shouldLoadLimitsSettings,
       ws,
     ]
@@ -709,7 +711,7 @@ export function SettingsScreen({
 
         if (event.method === 'bridge/capabilities/changed') {
           void loadBridgeCapabilities();
-          if (shouldLoadCredentialsSettings) {
+          if (shouldLoadEngineSettings) {
             void loadCursorCredentials();
           }
         }
@@ -721,7 +723,7 @@ export function SettingsScreen({
       loadCursorCredentials,
       loadRateLimits,
       shouldLoadAccountSettings,
-      shouldLoadCredentialsSettings,
+      shouldLoadEngineSettings,
       shouldLoadLimitsSettings,
       ws,
     ]
@@ -1181,6 +1183,24 @@ export function SettingsScreen({
     [bridgeLatestVersion, bridgeMaintenanceActive, bridgeMaintenanceBusy, bridgeUpdateStarting, startBridgeUpdate]
   );
 
+  const handleConnectEngine = useCallback(
+    (engine: Exclude<ChatEngine, 'codex'>) => {
+      const label = getChatEngineLabel(engine);
+      if (activeBridgeProfile && isGitHubBridgeProfile(activeBridgeProfile) && onConnectGitHubCodespaces) {
+        setEngineActionMessage(`${label} setup continues from GitHub Codespaces.`);
+        onConnectGitHubCodespaces();
+        return;
+      }
+
+      const command =
+        engine === 'cursor'
+          ? 'clawdex init --engines codex,cursor'
+          : 'clawdex init --engines codex,opencode';
+      setEngineActionMessage(`Run ${command} on the bridge host, then restart the connection.`);
+    },
+    [activeBridgeProfile, onConnectGitHubCodespaces]
+  );
+
   const enginePickerOptions = useMemo<SelectionSheetOption[]>(
     () =>
       availableEngines.map((engine) => ({
@@ -1300,10 +1320,10 @@ export function SettingsScreen({
           onPress={() => navigateToRoute('account')}
         />
         <MenuEntry
-          icon="key-outline"
-          title="Credentials"
-          description={credentialsSummary}
-          onPress={() => navigateToRoute('credentials')}
+          icon="hardware-chip-outline"
+          title="Engines"
+          description={enginesSummary}
+          onPress={() => navigateToRoute('engines')}
         />
         <MenuEntry
           icon="server-outline"
@@ -1772,16 +1792,69 @@ export function SettingsScreen({
     </>
   );
 
-  const renderCredentialsContent = () => {
+  const renderEnginesContent = () => {
     const statusColor =
       cursorCredentials?.valid === true
         ? colors.statusComplete
         : cursorCredentials?.configured
           ? colors.error
           : colors.textMuted;
+    const codexConnected =
+      runtimeAvailableEngines.length === 0 || runtimeAvailableEngines.includes('codex');
+    const cursorConnected =
+      cursorCredentials?.valid === true &&
+      (cursorCredentials.runtimeAvailable || runtimeAvailableEngines.includes('cursor'));
+    const cursorActionLabel = cursorConnected ? undefined : 'Connect';
+    const opencodeConnected = runtimeAvailableEngines.includes('opencode');
+    const opencodeActionLabel = opencodeConnected ? undefined : 'Connect';
     return (
       <>
-        <Text style={styles.sectionLabel}>Cursor</Text>
+        <Text style={styles.sectionLabel}>Engines</Text>
+        <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
+          <EngineConnectionEntry
+            icon="sparkles-outline"
+            title="Codex"
+            description="Already available on this connection."
+            status={codexConnected ? 'Connected' : 'Unavailable'}
+            statusTone={codexConnected ? 'connected' : 'muted'}
+          />
+          <EngineConnectionEntry
+            icon="code-slash-outline"
+            title="Cursor"
+            description={formatCursorEngineDescription(cursorCredentials, cursorCredentialsLoading)}
+            status={formatCursorEngineStatus(cursorCredentials, cursorCredentialsLoading)}
+            statusTone={
+              cursorConnected ? 'connected' : cursorCredentials?.configured ? 'warning' : 'muted'
+            }
+            actionLabel={cursorActionLabel}
+            busy={cursorCredentialsLoading && !cursorCredentials}
+            onAction={cursorActionLabel ? () => handleConnectEngine('cursor') : undefined}
+          />
+          <EngineConnectionEntry
+            icon="layers-outline"
+            title="OpenCode"
+            description={
+              opencodeConnected
+                ? 'OpenCode is available for new chats.'
+                : 'Enable OpenCode on the bridge or hosted workspace.'
+            }
+            status={opencodeConnected ? 'Connected' : 'Not connected'}
+            statusTone={opencodeConnected ? 'connected' : 'muted'}
+            actionLabel={opencodeActionLabel}
+            onAction={opencodeActionLabel ? () => handleConnectEngine('opencode') : undefined}
+            isLast
+          />
+        </BlurView>
+
+        <Text style={styles.subtleHintText}>
+          Codex is connected by default. Cursor uses a Cursor API key on the bridge; OpenCode uses
+          the provider credentials configured for OpenCode.
+        </Text>
+        {engineActionMessage ? (
+          <Text style={styles.successText}>{engineActionMessage}</Text>
+        ) : null}
+
+        <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Cursor Details</Text>
         <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
           {cursorCredentialsLoading && !cursorCredentials ? (
             <View style={styles.accountLoadingState}>
@@ -1818,12 +1891,8 @@ export function SettingsScreen({
               <Row label="Usage" value="Not exposed by Cursor API" isLast />
             </>
           )}
-
         </BlurView>
 
-        <Text style={styles.subtleHintText}>
-          Manage the Cursor API key from clawdex init on the host.
-        </Text>
         {cursorCredentialsError ? (
           <Text style={styles.errorText}>{cursorCredentialsError}</Text>
         ) : null}
@@ -2034,8 +2103,8 @@ export function SettingsScreen({
         return renderLimitsContent();
       case 'bridge':
         return renderBridgeContent();
-      case 'credentials':
-        return renderCredentialsContent();
+      case 'engines':
+        return renderEnginesContent();
       case 'tips':
         return renderTipsContent();
       case 'legal':
@@ -2294,6 +2363,78 @@ function MenuEntry({
       </View>
       <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
     </Pressable>
+  );
+}
+
+type EngineStatusTone = 'connected' | 'warning' | 'muted';
+
+function EngineConnectionEntry({
+  icon,
+  title,
+  description,
+  status,
+  statusTone,
+  actionLabel,
+  busy,
+  onAction,
+  isLast,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  description: string;
+  status: string;
+  statusTone: EngineStatusTone;
+  actionLabel?: string;
+  busy?: boolean;
+  onAction?: () => void;
+  isLast?: boolean;
+}) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { colors } = theme;
+  const statusColor =
+    statusTone === 'connected'
+      ? colors.statusComplete
+      : statusTone === 'warning'
+        ? colors.warning
+        : colors.textMuted;
+
+  return (
+    <View style={[styles.engineRow, isLast && styles.engineRowLast]}>
+      <View style={styles.menuIconWrap}>
+        <Ionicons name={icon} size={16} color={colors.textPrimary} />
+      </View>
+      <View style={styles.engineTextWrap}>
+        <View style={styles.engineTitleLine}>
+          <Text style={styles.menuTitle}>{title}</Text>
+          <View style={[styles.engineStatusPill, { borderColor: statusColor }]}>
+            <Text style={[styles.engineStatusText, { color: statusColor }]} numberOfLines={1}>
+              {status}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.menuDescription} numberOfLines={2}>
+          {description}
+        </Text>
+      </View>
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.engineConnectBtn,
+            busy && styles.settingRowDisabled,
+            pressed && !busy && styles.engineConnectBtnPressed,
+          ]}
+        >
+          {busy ? (
+            <ActivityIndicator color={theme.colors.accentText} size="small" />
+          ) : (
+            <Text style={styles.engineConnectBtnText}>{actionLabel}</Text>
+          )}
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -2651,6 +2792,56 @@ const createStyles = (theme: AppTheme) => {
       ...theme.typography.caption,
       color: settingsValueColor,
     },
+    engineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: settingsDivider,
+    },
+    engineRowLast: {
+      borderBottomWidth: 0,
+    },
+    engineTextWrap: {
+      flex: 1,
+      gap: 4,
+      minWidth: 0,
+    },
+    engineTitleLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      flexWrap: 'wrap',
+    },
+    engineStatusPill: {
+      borderRadius: theme.radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: 2,
+    },
+    engineStatusText: {
+      ...theme.typography.caption,
+      fontWeight: '700',
+    },
+    engineConnectBtn: {
+      minWidth: 78,
+      minHeight: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.accent,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+    },
+    engineConnectBtnPressed: {
+      backgroundColor: theme.colors.accentPressed,
+    },
+    engineConnectBtnText: {
+      ...theme.typography.caption,
+      color: theme.colors.accentText,
+      fontWeight: '700',
+    },
     tipHero: {
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -2915,26 +3106,84 @@ function mergeChatEngines(
   return merged.length > 0 ? merged : ['codex'];
 }
 
-function formatCursorCredentialSummary(
+function formatEnginesSummary(
+  availableEngines: readonly ChatEngine[],
+  status: CursorCredentialStatus | null,
+  loading: boolean
+): string {
+  const connected = new Set<ChatEngine>(availableEngines);
+  connected.add('codex');
+  if (status?.valid === true && status.runtimeAvailable) {
+    connected.add('cursor');
+  }
+
+  const parts = [...connected].map((engine) => getChatEngineLabel(engine));
+  if (parts.length >= 3) {
+    return 'Codex, Cursor, OpenCode connected';
+  }
+  if (parts.length > 1) {
+    return `${parts.join(', ')} connected`;
+  }
+  if (loading && !status) {
+    return 'Codex connected · Checking Cursor';
+  }
+  if (!status) {
+    return 'Codex connected';
+  }
+  if (!status.configured) {
+    return 'Codex connected · Cursor API key required';
+  }
+  if (status.valid === true) {
+    return status.runtimeAvailable ? 'Codex and Cursor connected' : 'Codex connected · Cursor key saved';
+  }
+  if (status.valid === false) {
+    return 'Codex connected · Cursor key invalid';
+  }
+  return 'Codex connected · Cursor status unknown';
+}
+
+function formatCursorEngineDescription(
   status: CursorCredentialStatus | null,
   loading: boolean
 ): string {
   if (loading && !status) {
-    return 'Checking Cursor credentials';
+    return 'Checking the Cursor API key on this connection.';
   }
-  if (!status) {
-    return 'Manage Cursor API key';
-  }
-  if (!status.configured) {
-    return 'Cursor API key required';
-  }
-  if (status.valid === true) {
-    return status.runtimeAvailable ? 'Cursor connected' : 'Cursor key saved';
+  if (!status?.configured) {
+    return 'Connect with a Cursor API key on the bridge.';
   }
   if (status.valid === false) {
-    return 'Cursor key invalid';
+    return 'The saved Cursor API key needs attention.';
   }
-  return 'Cursor key status unknown';
+  if (status.valid === true && status.runtimeAvailable) {
+    return 'Cursor is available for new chats.';
+  }
+  if (status.valid === true) {
+    return 'Cursor key is saved; restart the bridge if it is not available.';
+  }
+  return 'Cursor key status is not available yet.';
+}
+
+function formatCursorEngineStatus(
+  status: CursorCredentialStatus | null,
+  loading: boolean
+): string {
+  if (loading && !status) {
+    return 'Checking';
+  }
+  if (!status?.configured) {
+    return 'Not connected';
+  }
+  if (status.valid === false) {
+    return 'Key invalid';
+  }
+  if (status.valid === true && status.runtimeAvailable) {
+    return 'Connected';
+  }
+  if (status.valid === true) {
+    return 'Key saved';
+  }
+  return 'Unknown';
 }
 
 function formatCursorCredentialStatus(status: CursorCredentialStatus | null): string {

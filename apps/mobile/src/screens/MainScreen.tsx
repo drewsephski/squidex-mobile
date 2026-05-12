@@ -166,6 +166,7 @@ import {
   normalizeAttachmentPath,
   normalizeCloneDirectoryName,
   deriveCloneDirectoryName,
+  formatGitCloneFailureMessage,
   joinWorkspacePath,
   toMentionInput,
   toOptimisticUserContent,
@@ -2824,6 +2825,11 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           parentPath,
           directoryName,
         });
+        const cloneFailureMessage = formatGitCloneFailureMessage(cloned, directoryName);
+        if (cloneFailureMessage) {
+          setGitCheckoutError(cloneFailureMessage);
+          return;
+        }
         const clonedPath = normalizeWorkspacePath(cloned.cwd) ?? joinWorkspacePath(parentPath, directoryName);
         onDefaultStartCwdChange?.(clonedPath);
         setWorkspaceBrowsePath(clonedPath);

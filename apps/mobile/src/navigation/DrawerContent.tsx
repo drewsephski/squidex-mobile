@@ -79,7 +79,7 @@ const DRAWER_WORKSPACE_ROW_HEIGHT = 58;
 const DRAWER_CHAT_ROW_HEIGHT = 50;
 const DRAWER_ROW_RADIUS = 14;
 const DRAWER_ACTION_HEIGHT = 36;
-const DRAWER_FOOTER_ACTION_HEIGHT = 36;
+const DRAWER_FOOTER_ACTION_HEIGHT = 52;
 const DRAWER_ICON_TILE_SIZE = 26;
 const CHAT_FILTER_OPTIONS: ReadonlyArray<{
   key: ChatEngine;
@@ -2357,11 +2357,11 @@ const createStyles = (theme: AppTheme) => {
     marginTop: 'auto',
     paddingHorizontal: theme.spacing.md,
     paddingTop: theme.spacing.xs,
-    paddingBottom: theme.spacing.sm,
+    paddingBottom: 0,
   },
   footerSettingsButton: {
     height: DRAWER_FOOTER_ACTION_HEIGHT,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.borderLight,
     backgroundColor: theme.colors.bgItem,
