@@ -19,6 +19,8 @@ import {
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
+  Easing,
+  LinearTransition,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -27,7 +29,14 @@ import Animated, {
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
 import { HostBridgeApiClient } from './src/api/client';
-import { APP_SETTINGS_VERSION, parseAppSettings } from './src/appSettings';
+import { toRecord } from './src/api/chatMapping';
+import { readAccountRateLimitSnapshot } from './src/api/rateLimits';
+import {
+  APP_SETTINGS_VERSION,
+  DEFAULT_WORKSPACE_CHAT_LIMIT,
+  parseAppSettings,
+  type WorkspaceChatLimit,
+} from './src/appSettings';
 import type {
   ApprovalMode,
   Chat,
@@ -47,6 +56,8 @@ import {
   clearBridgeProfileStore,
   getActiveBridgeProfile,
   loadBridgeProfileStore,
+  removeBridgeProfile,
+  renameBridgeProfile,
   saveBridgeProfileStore,
   setActiveBridgeProfile,
   type BridgeProfile,
@@ -81,12 +92,18 @@ import {
   createAppTheme,
   resolveThemeMode,
   type AppearancePreference,
+  type DarkUiPalette,
 } from './src/theme';
 
 type AppScreen = 'Main' | 'ChatGit' | 'Browser' | 'Settings' | 'Privacy' | 'Terms';
 type Screen = AppScreen | 'Onboarding';
 
-const DRAWER_WIDTH = 280;
+const DRAWER_MIN_WIDTH = 260;
+const DRAWER_MAX_WIDTH = 296;
+const DRAWER_SCREEN_RATIO = 0.69;
+const TABLET_LAYOUT_MIN_WIDTH = 700;
+const TABLET_SIDEBAR_WIDTH = 312;
+const TABLET_SIDEBAR_ANIMATION_MS = 260;
 const EDGE_SWIPE_WIDTH = 24;
 const CHAT_GIT_BACK_DISTANCE = 56;
 const CHAT_GIT_BACK_VELOCITY = 900;
@@ -95,11 +112,14 @@ const DRAWER_SNAP_VELOCITY = 920;
 const DRAWER_VELOCITY_PROJECTION = 0.08;
 const DRAWER_RUBBER_BAND_STRENGTH = 0.2;
 const DRAWER_CONTENT_SCALE = 0.94;
+const CHAT_TRANSITION_MIN_MS = 220;
 const DRAWER_CONTENT_PARALLAX = 18;
 const DRAWER_MAX_RADIUS = 28;
 const DRAWER_MAX_SHADOW_OPACITY = 0.24;
 const DRAWER_MAX_SHADOW_RADIUS = 26;
 const DRAWER_MAX_ELEVATION = 18;
+const APP_PREFETCH_DELAY_MS = 0;
+const APP_PREFETCH_CHAT_LIMIT = 5;
 const APP_SETTINGS_FILE = 'clawdex-app-settings.json';
 const AUTO_STORE_REVIEW_RETRY_MS = 24 * 60 * 60 * 1000;
 
@@ -126,7 +146,7 @@ export default function App() {
       bridgeUrl
         ? new HostBridgeWsClient(bridgeUrl, {
             authToken: bridgeToken ?? env.hostBridgeToken,
-            allowQueryTokenAuth: env.allowWsQueryTokenAuth
+            allowQueryTokenAuth: env.allowWsQueryTokenAuth,
           })
         : null,
     [bridgeToken, bridgeUrl]
@@ -167,13 +187,18 @@ export default function App() {
   );
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('yolo');
   const [showToolCalls, setShowToolCalls] = useState(true);
+  const [workspaceChatLimit, setWorkspaceChatLimit] = useState<WorkspaceChatLimit>(
+    DEFAULT_WORKSPACE_CHAT_LIMIT
+  );
   const [appearancePreference, setAppearancePreference] =
     useState<AppearancePreference>('system');
+  const [darkUiPalette, setDarkUiPalette] = useState<DarkUiPalette>('classic');
   const [fontPreference, setFontPreference] = useState<FontPreference>(
     DEFAULT_FONT_PREFERENCE
   );
   const [recentBrowserTargetUrls, setRecentBrowserTargetUrls] = useState<string[]>([]);
   const [pendingBrowserTargetUrl, setPendingBrowserTargetUrl] = useState<string | null>(null);
+  const [, setBridgeConnected] = useState(() => Boolean(ws?.isConnected));
   const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(
     AppState.currentState
   );
@@ -185,6 +210,7 @@ export default function App() {
     null
   );
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [tabletSidebarVisible, setTabletSidebarVisible] = useState(true);
   const [fontsLoaded, fontsError] = useFonts(APP_FONT_ASSETS);
   const drawerOpenRef = useRef(false);
   const drawerVisibleRef = useRef(false);
@@ -197,20 +223,44 @@ export default function App() {
   const storeReviewStateRef = useRef<AutoStoreReviewState>(createDefaultAutoStoreReviewState());
   const automaticStoreReviewInFlightRef = useRef(false);
   const { width: screenWidth } = useWindowDimensions();
+  const usesTabletLayout = screenWidth >= TABLET_LAYOUT_MIN_WIDTH;
   const resolvedThemeMode = resolveThemeMode(appearancePreference, systemColorScheme);
   const themeFontPreference = fontsLoaded ? fontPreference : DEFAULT_FONT_PREFERENCE;
   const theme = useMemo(
-    () => createAppTheme(resolvedThemeMode, themeFontPreference),
-    [resolvedThemeMode, themeFontPreference]
+    () =>
+      createAppTheme(
+        resolvedThemeMode,
+        themeFontPreference,
+        resolvedThemeMode === 'dark' ? darkUiPalette : 'classic'
+      ),
+    [resolvedThemeMode, themeFontPreference, darkUiPalette]
   );
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const contentShiftOpen = Math.min(DRAWER_WIDTH - 12, screenWidth * 0.74);
-  const drawerOffset = useSharedValue(-DRAWER_WIDTH);
-  const drawerDragStartOffset = useSharedValue(-DRAWER_WIDTH);
+  const drawerWidth = useMemo(() => getDrawerWidth(screenWidth), [screenWidth]);
+  const tabletLayoutTransition = useMemo(
+    () =>
+      LinearTransition.duration(TABLET_SIDEBAR_ANIMATION_MS).easing(
+        Easing.out(Easing.cubic)
+      ),
+    []
+  );
+  const contentShiftOpen = Math.min(drawerWidth - 12, screenWidth * 0.74);
+  const drawerOffset = useSharedValue(-drawerWidth);
+  const drawerDragStartOffset = useSharedValue(-drawerWidth);
   const drawerGestureDidSettle = useSharedValue(true);
 
   const screenFrameAnimatedStyle = useAnimatedStyle(() => {
-    const progress = getDrawerOpenProgress(drawerOffset.value);
+    if (usesTabletLayout) {
+      return {
+        transform: [{ translateX: 0 }, { scale: 1 }],
+        borderRadius: 0,
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        elevation: 0,
+      };
+    }
+
+    const progress = getDrawerOpenProgress(drawerOffset.value, drawerWidth);
     return {
       transform: [
         { translateX: progress * contentShiftOpen },
@@ -221,10 +271,10 @@ export default function App() {
       shadowRadius: DRAWER_MAX_SHADOW_RADIUS * progress,
       elevation: DRAWER_MAX_ELEVATION * progress,
     };
-  }, [contentShiftOpen]);
+  }, [contentShiftOpen, drawerWidth, usesTabletLayout]);
 
   const overlayAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: getDrawerOpenProgress(drawerOffset.value),
+    opacity: getDrawerOpenProgress(drawerOffset.value, drawerWidth),
   }));
 
   const drawerAnimatedStyle = useAnimatedStyle(() => ({
@@ -232,7 +282,7 @@ export default function App() {
   }));
 
   const drawerContentAnimatedStyle = useAnimatedStyle(() => {
-    const progress = getDrawerOpenProgress(drawerOffset.value);
+    const progress = getDrawerOpenProgress(drawerOffset.value, drawerWidth);
     return {
       opacity: 0.88 + progress * 0.12,
       transform: [
@@ -243,13 +293,106 @@ export default function App() {
   });
 
   useEffect(() => {
+    const nextOffset = drawerOpenRef.current ? 0 : -drawerWidth;
+    drawerOffset.value = nextOffset;
+    drawerDragStartOffset.value = nextOffset;
+  }, [drawerDragStartOffset, drawerOffset, drawerWidth]);
+
+  useEffect(() => {
     if (!ws) {
+      setBridgeConnected(false);
       return;
     }
 
     ws.connect();
     return () => ws.disconnect();
   }, [ws]);
+
+  useEffect(() => {
+    if (!ws) {
+      setBridgeConnected(false);
+      return;
+    }
+
+    setBridgeConnected(ws.isConnected);
+    return ws.onStatus((connected) => {
+      setBridgeConnected(connected);
+    });
+  }, [ws]);
+
+  useEffect(() => {
+    if (!api || !ws || currentScreen === 'Onboarding') {
+      return;
+    }
+
+    let cancelled = false;
+    let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const runPrefetch = () => {
+      if (cancelled) {
+        return;
+      }
+      void api.primeChats({ limit: APP_PREFETCH_CHAT_LIMIT }).catch(() => {});
+      void api.primeAccountRateLimits().catch(() => {});
+    };
+
+    const schedulePrefetch = () => {
+      if (prefetchTimer) {
+        return;
+      }
+
+      prefetchTimer = setTimeout(() => {
+        prefetchTimer = null;
+        runPrefetch();
+      }, APP_PREFETCH_DELAY_MS);
+    };
+
+    schedulePrefetch();
+    const unsubscribeStatus = ws.onStatus((connected) => {
+      if (connected) {
+        schedulePrefetch();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (prefetchTimer) {
+        clearTimeout(prefetchTimer);
+        prefetchTimer = null;
+      }
+      unsubscribeStatus();
+    };
+  }, [api, currentScreen, ws]);
+
+  useEffect(() => {
+    if (!api || !ws) {
+      return;
+    }
+
+    return ws.onEvent((event) => {
+      if (event.method === 'account/rateLimits/updated') {
+        const params = toRecord(event.params);
+        const snapshot = readAccountRateLimitSnapshot(
+          params?.rateLimits ?? params?.rate_limits ?? event.params
+        );
+        api.rememberAccountRateLimits(snapshot);
+        return;
+      }
+
+      if (!event.method.startsWith('codex/event/')) {
+        return;
+      }
+
+      const params = toRecord(event.params);
+      const msg = toRecord(params?.msg);
+      const snapshot = readAccountRateLimitSnapshot(
+        msg?.rate_limits ?? msg?.rateLimits
+      );
+      if (snapshot && !api.peekAccountRateLimits()) {
+        api.rememberAccountRateLimits(snapshot);
+      }
+    });
+  }, [api, ws]);
 
   useEffect(() => {
     void configureRevenueCatIfNeeded().catch((error) => {
@@ -466,7 +609,9 @@ export default function App() {
       nextDefaultEngineSettings: EngineDefaultSettingsMap,
       nextApprovalMode: ApprovalMode,
       nextShowToolCalls: boolean,
+      nextWorkspaceChatLimit: WorkspaceChatLimit,
       nextAppearancePreference: AppearancePreference,
+      nextDarkUiPalette: DarkUiPalette,
       nextFontPreference: FontPreference,
       nextRecentBrowserTargetUrls: string[]
     ) => {
@@ -482,7 +627,9 @@ export default function App() {
         defaultEngineSettings: nextDefaultEngineSettings,
         approvalMode: nextApprovalMode,
         showToolCalls: nextShowToolCalls,
+        workspaceChatLimit: nextWorkspaceChatLimit,
         appearancePreference: nextAppearancePreference,
+        darkUiPalette: nextDarkUiPalette,
         fontPreference: nextFontPreference,
         recentBrowserTargetUrls: nextRecentBrowserTargetUrls,
       });
@@ -505,7 +652,9 @@ export default function App() {
       setDefaultEngineSettings(createEmptyEngineDefaultSettingsMap());
       setApprovalMode('yolo');
       setShowToolCalls(true);
+      setWorkspaceChatLimit(DEFAULT_WORKSPACE_CHAT_LIMIT);
       setAppearancePreference('system');
+      setDarkUiPalette('classic');
       setFontPreference(DEFAULT_FONT_PREFERENCE);
       setRecentBrowserTargetUrls([]);
     };
@@ -550,7 +699,9 @@ export default function App() {
         setDefaultEngineSettings(parsed.defaultEngineSettings);
         setApprovalMode(parsed.approvalMode);
         setShowToolCalls(parsed.showToolCalls);
+        setWorkspaceChatLimit(parsed.workspaceChatLimit);
         setAppearancePreference(parsed.appearancePreference);
+        setDarkUiPalette(parsed.darkUiPalette);
         setFontPreference(parsed.fontPreference);
         setRecentBrowserTargetUrls(parsed.recentBrowserTargetUrls);
 
@@ -561,7 +712,9 @@ export default function App() {
             parsed.defaultEngineSettings,
             parsed.approvalMode,
             parsed.showToolCalls,
+            parsed.workspaceChatLimit,
             parsed.appearancePreference,
+            parsed.darkUiPalette,
             parsed.fontPreference,
             parsed.recentBrowserTargetUrls
           );
@@ -625,6 +778,13 @@ export default function App() {
 
   const animateDrawerTo = useCallback(
     (shouldOpen: boolean, velocityX = 0) => {
+      if (usesTabletLayout) {
+        handleDrawerSettled(false);
+        drawerOffset.value = -drawerWidth;
+        drawerDragStartOffset.value = -drawerWidth;
+        return;
+      }
+
       if (!shouldOpen && !drawerVisibleRef.current) {
         return;
       }
@@ -636,7 +796,7 @@ export default function App() {
 
       ensureDrawerVisible();
       drawerOffset.value = withSpring(
-        shouldOpen ? 0 : -DRAWER_WIDTH,
+        shouldOpen ? 0 : -drawerWidth,
         buildDrawerSpringConfig(velocityX),
         (finished) => {
           if (finished) {
@@ -645,7 +805,16 @@ export default function App() {
         }
       );
     },
-    [dismissKeyboard, drawerOffset, ensureDrawerVisible, handleDrawerSettled]
+    [
+      dismissKeyboard,
+      drawerDragStartOffset,
+      drawerOffset,
+      drawerWidth,
+      ensureDrawerCapturesTouches,
+      ensureDrawerVisible,
+      handleDrawerSettled,
+      usesTabletLayout,
+    ]
   );
 
   const openDrawer = useCallback(() => {
@@ -656,25 +825,33 @@ export default function App() {
     animateDrawerTo(false);
   }, [animateDrawerTo]);
 
+  const handleNavigationToggle = useCallback(() => {
+    if (usesTabletLayout) {
+      setTabletSidebarVisible((visible) => !visible);
+      return;
+    }
+
+    openDrawer();
+  }, [openDrawer, usesTabletLayout]);
+
   const openChatWithTransition = useCallback(
     async (id: string, snapshot?: Chat | null) => {
       const requestId = chatTransitionRequestIdRef.current + 1;
       chatTransitionRequestIdRef.current = requestId;
       const startedAt = Date.now();
-      setChatTransitionChatId(id);
-      setMainOpeningChatId(id);
+
+      const nextSnapshot =
+        snapshot && snapshot.id === id ? snapshot : api?.peekChatShell(id) ?? null;
+      const hasHydratedSnapshot = Boolean(nextSnapshot && nextSnapshot.messages.length > 0);
+      const shouldShowTransition = !hasHydratedSnapshot;
+
+      setChatTransitionChatId(shouldShowTransition ? id : null);
+      setMainOpeningChatId(shouldShowTransition ? id : null);
       closeDrawer();
 
-      let nextSnapshot = snapshot && snapshot.id === id ? snapshot : null;
-      if (!nextSnapshot && currentScreen !== 'Main' && api) {
-        try {
-          nextSnapshot = await api.getChat(id);
-        } catch {
-          nextSnapshot = null;
-        }
-      }
-
-      const remainingMs = 220 - (Date.now() - startedAt);
+      const remainingMs = shouldShowTransition
+        ? CHAT_TRANSITION_MIN_MS - (Date.now() - startedAt)
+        : 0;
       if (remainingMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, remainingMs));
       }
@@ -688,13 +865,13 @@ export default function App() {
       setGitChat(null);
       setCurrentScreen('Main');
       setPendingMainChatId(id);
-      setPendingMainChatSnapshot(nextSnapshot);
+      setPendingMainChatSnapshot(hasHydratedSnapshot ? nextSnapshot : null);
       setChatTransitionChatId(null);
-      if (nextSnapshot) {
+      if (hasHydratedSnapshot) {
         setMainOpeningChatId(null);
       }
     },
-    [api, closeDrawer, currentScreen]
+    [api, closeDrawer]
   );
 
   const handleChatGitBack = useCallback(() => {
@@ -734,7 +911,8 @@ export default function App() {
     () =>
       Gesture.Pan()
         .enabled(
-          currentScreen !== 'ChatGit' &&
+          !usesTabletLayout &&
+            currentScreen !== 'ChatGit' &&
             currentScreen !== 'Browser' &&
             (currentScreen !== 'Settings' || settingsAllowsDrawerGesture)
         )
@@ -749,19 +927,24 @@ export default function App() {
         })
         .onUpdate((event) => {
           drawerOffset.value = applyDrawerRubberBand(
-            drawerDragStartOffset.value + event.translationX
+            drawerDragStartOffset.value + event.translationX,
+            drawerWidth
           );
         })
         .onEnd((event) => {
           drawerGestureDidSettle.value = true;
-          const nextOffset = clampDrawerOffset(drawerDragStartOffset.value + event.translationX);
+          const nextOffset = clampDrawerOffset(
+            drawerDragStartOffset.value + event.translationX,
+            drawerWidth
+          );
           const shouldOpen = shouldSettleDrawerOpen(
             nextOffset,
             event.velocityX,
+            drawerWidth,
             drawerDragStartOffset.value
           );
           drawerOffset.value = withSpring(
-            shouldOpen ? 0 : -DRAWER_WIDTH,
+            shouldOpen ? 0 : -drawerWidth,
             buildDrawerSpringConfig(event.velocityX),
             (finished) => {
               if (finished) {
@@ -775,14 +958,15 @@ export default function App() {
             return;
           }
           drawerGestureDidSettle.value = true;
-          const nextOffset = clampDrawerOffset(drawerOffset.value);
+          const nextOffset = clampDrawerOffset(drawerOffset.value, drawerWidth);
           const shouldOpen = shouldSettleDrawerOpen(
             nextOffset,
             event.velocityX,
+            drawerWidth,
             drawerDragStartOffset.value
           );
           drawerOffset.value = withSpring(
-            shouldOpen ? 0 : -DRAWER_WIDTH,
+            shouldOpen ? 0 : -drawerWidth,
             buildDrawerSpringConfig(event.velocityX),
             (finished) => {
               if (finished) {
@@ -798,11 +982,29 @@ export default function App() {
       drawerDragStartOffset,
       drawerGestureDidSettle,
       drawerOffset,
+      drawerWidth,
       handleDrawerSettled,
       ensureDrawerCapturesTouches,
       settingsAllowsDrawerGesture,
+      usesTabletLayout,
     ]
   );
+
+  useEffect(() => {
+    if (!usesTabletLayout) {
+      return;
+    }
+
+    handleDrawerSettled(false);
+    drawerOffset.value = -drawerWidth;
+    drawerDragStartOffset.value = -drawerWidth;
+  }, [
+    drawerDragStartOffset,
+    drawerOffset,
+    drawerWidth,
+    handleDrawerSettled,
+    usesTabletLayout,
+  ]);
 
   useEffect(() => {
     if (currentScreen !== 'Settings' && !settingsAllowsDrawerGesture) {
@@ -824,19 +1026,24 @@ export default function App() {
         })
         .onUpdate((event) => {
           drawerOffset.value = applyDrawerRubberBand(
-            drawerDragStartOffset.value + event.translationX
+            drawerDragStartOffset.value + event.translationX,
+            drawerWidth
           );
         })
         .onEnd((event) => {
           drawerGestureDidSettle.value = true;
-          const nextOffset = clampDrawerOffset(drawerDragStartOffset.value + event.translationX);
+          const nextOffset = clampDrawerOffset(
+            drawerDragStartOffset.value + event.translationX,
+            drawerWidth
+          );
           const shouldOpen = shouldSettleDrawerOpen(
             nextOffset,
             event.velocityX,
+            drawerWidth,
             drawerDragStartOffset.value
           );
           drawerOffset.value = withSpring(
-            shouldOpen ? 0 : -DRAWER_WIDTH,
+            shouldOpen ? 0 : -drawerWidth,
             buildDrawerSpringConfig(event.velocityX),
             (finished) => {
               if (finished) {
@@ -850,14 +1057,15 @@ export default function App() {
             return;
           }
           drawerGestureDidSettle.value = true;
-          const nextOffset = clampDrawerOffset(drawerOffset.value);
+          const nextOffset = clampDrawerOffset(drawerOffset.value, drawerWidth);
           const shouldOpen = shouldSettleDrawerOpen(
             nextOffset,
             event.velocityX,
+            drawerWidth,
             drawerDragStartOffset.value
           );
           drawerOffset.value = withSpring(
-            shouldOpen ? 0 : -DRAWER_WIDTH,
+            shouldOpen ? 0 : -drawerWidth,
             buildDrawerSpringConfig(event.velocityX),
             (finished) => {
               if (finished) {
@@ -870,6 +1078,7 @@ export default function App() {
       drawerDragStartOffset,
       drawerGestureDidSettle,
       drawerOffset,
+      drawerWidth,
       drawerVisible,
       ensureDrawerCapturesTouches,
       handleDrawerSettled,
@@ -939,7 +1148,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -951,7 +1162,9 @@ export default function App() {
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       appearancePreference,
+      darkUiPalette,
       fontPreference,
     ]
   );
@@ -975,7 +1188,9 @@ export default function App() {
         nextDefaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -988,7 +1203,9 @@ export default function App() {
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       appearancePreference,
+      darkUiPalette,
       fontPreference,
     ]
   );
@@ -1003,7 +1220,9 @@ export default function App() {
         defaultEngineSettings,
         normalizedMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -1015,7 +1234,9 @@ export default function App() {
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       appearancePreference,
+      darkUiPalette,
       fontPreference,
     ]
   );
@@ -1029,7 +1250,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         nextValue,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -1041,6 +1264,7 @@ export default function App() {
       defaultStartCwd,
       recentBrowserTargetUrls,
       saveAppSettings,
+      workspaceChatLimit,
       appearancePreference,
       fontPreference,
     ]
@@ -1056,7 +1280,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -1068,7 +1294,9 @@ export default function App() {
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       appearancePreference,
+      darkUiPalette,
       fontPreference,
     ]
   );
@@ -1082,7 +1310,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         nextPreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -1092,10 +1322,43 @@ export default function App() {
       defaultChatEngine,
       defaultEngineSettings,
       defaultStartCwd,
+      darkUiPalette,
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       fontPreference,
+    ]
+  );
+
+  const handleDarkUiPaletteChange = useCallback(
+    (nextPalette: DarkUiPalette) => {
+      const normalized = nextPalette === 'grey' ? 'grey' : 'classic';
+      setDarkUiPalette(normalized);
+      void saveAppSettings(
+        defaultStartCwd,
+        defaultChatEngine,
+        defaultEngineSettings,
+        approvalMode,
+        showToolCalls,
+        workspaceChatLimit,
+        appearancePreference,
+        normalized,
+        fontPreference,
+        recentBrowserTargetUrls
+      );
+    },
+    [
+      approvalMode,
+      appearancePreference,
+      defaultChatEngine,
+      defaultEngineSettings,
+      defaultStartCwd,
+      fontPreference,
+      recentBrowserTargetUrls,
+      saveAppSettings,
+      showToolCalls,
+      workspaceChatLimit,
     ]
   );
 
@@ -1109,7 +1372,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         normalizedPreference,
         recentBrowserTargetUrls
       );
@@ -1117,12 +1382,14 @@ export default function App() {
     [
       approvalMode,
       appearancePreference,
+      darkUiPalette,
       defaultChatEngine,
       defaultEngineSettings,
       defaultStartCwd,
       recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
     ]
   );
 
@@ -1135,7 +1402,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         nextTargets
       );
@@ -1143,10 +1412,42 @@ export default function App() {
     [
       approvalMode,
       appearancePreference,
+      darkUiPalette,
       defaultChatEngine,
       defaultEngineSettings,
       defaultStartCwd,
       fontPreference,
+      saveAppSettings,
+      showToolCalls,
+      workspaceChatLimit,
+    ]
+  );
+
+  const handleWorkspaceChatLimitChange = useCallback(
+    (nextLimit: WorkspaceChatLimit) => {
+      setWorkspaceChatLimit(nextLimit);
+      void saveAppSettings(
+        defaultStartCwd,
+        defaultChatEngine,
+        defaultEngineSettings,
+        approvalMode,
+        showToolCalls,
+        nextLimit,
+        appearancePreference,
+        darkUiPalette,
+        fontPreference,
+        recentBrowserTargetUrls
+      );
+    },
+    [
+      approvalMode,
+      appearancePreference,
+      darkUiPalette,
+      defaultChatEngine,
+      defaultEngineSettings,
+      defaultStartCwd,
+      fontPreference,
+      recentBrowserTargetUrls,
       saveAppSettings,
       showToolCalls,
     ]
@@ -1158,7 +1459,10 @@ export default function App() {
         setPendingBrowserTargetUrl(targetUrl.trim());
       }
       setBrowserReturnScreen(
-        currentScreen === 'Browser' || currentScreen === 'Onboarding' ? 'Main' : currentScreen
+        currentScreen === 'Browser' ||
+          currentScreen === 'Onboarding'
+          ? 'Main'
+          : currentScreen
       );
       chatTransitionRequestIdRef.current += 1;
       setChatTransitionChatId(null);
@@ -1207,7 +1511,9 @@ export default function App() {
         defaultEngineSettings,
         approvalMode,
         showToolCalls,
+        workspaceChatLimit,
         appearancePreference,
+        darkUiPalette,
         fontPreference,
         recentBrowserTargetUrls
       );
@@ -1230,27 +1536,35 @@ export default function App() {
       resetBridgeSessionState,
       saveAppSettings,
       showToolCalls,
+      workspaceChatLimit,
       appearancePreference,
+      darkUiPalette,
     ]
   );
 
   const handleEditBridgeProfile = useCallback(() => {
     setOnboardingMode(bridgeUrl ? 'edit' : 'initial');
-    setOnboardingReturnScreen(currentScreen === 'Onboarding' ? 'Settings' : currentScreen);
+    setOnboardingReturnScreen(
+      currentScreen === 'Onboarding' ? 'Settings' : currentScreen
+    );
     setCurrentScreen('Onboarding');
     closeDrawer();
   }, [bridgeUrl, closeDrawer, currentScreen]);
 
   const handleAddBridgeProfile = useCallback(() => {
     setOnboardingMode('add');
-    setOnboardingReturnScreen(currentScreen === 'Onboarding' ? 'Settings' : currentScreen);
+    setOnboardingReturnScreen(
+      currentScreen === 'Onboarding' ? 'Settings' : currentScreen
+    );
     setCurrentScreen('Onboarding');
     closeDrawer();
   }, [closeDrawer, currentScreen]);
 
   const handleOpenBridgeRecoveryGuide = useCallback(() => {
     setOnboardingMode('reconnect');
-    setOnboardingReturnScreen(currentScreen === 'Onboarding' ? 'Settings' : currentScreen);
+    setOnboardingReturnScreen(
+      currentScreen === 'Onboarding' ? 'Settings' : currentScreen
+    );
     setCurrentScreen('Onboarding');
     closeDrawer();
   }, [closeDrawer, currentScreen]);
@@ -1264,6 +1578,38 @@ export default function App() {
       resetBridgeSessionState();
     },
     [currentBridgeProfileStore, resetBridgeSessionState]
+  );
+
+  const handleRenameBridgeProfile = useCallback(
+    async (profileId: string, nextName: string) => {
+      const nextStore = renameBridgeProfile(currentBridgeProfileStore, profileId, nextName);
+      await saveBridgeProfileStore(nextStore);
+      setBridgeProfiles(nextStore.profiles);
+      setActiveBridgeProfileId(nextStore.activeProfileId);
+    },
+    [currentBridgeProfileStore]
+  );
+
+  const handleDeleteBridgeProfile = useCallback(
+    async (profileId: string) => {
+      const deletingActiveProfile = activeBridgeProfileId === profileId;
+      const nextStore = removeBridgeProfile(currentBridgeProfileStore, profileId);
+      await saveBridgeProfileStore(nextStore);
+      setBridgeProfiles(nextStore.profiles);
+      setActiveBridgeProfileId(nextStore.activeProfileId);
+
+      if (deletingActiveProfile) {
+        resetBridgeSessionState();
+      }
+
+      if (nextStore.profiles.length === 0) {
+        setOnboardingMode('initial');
+        setOnboardingReturnScreen('Main');
+        setCurrentScreen('Onboarding');
+        closeDrawer();
+      }
+    },
+    [activeBridgeProfileId, closeDrawer, currentBridgeProfileStore, resetBridgeSessionState]
   );
 
   const handleClearSavedBridges = useCallback(async () => {
@@ -1466,7 +1812,7 @@ export default function App() {
             ws={activeWs}
             bridgeUrl={bridgeUrl}
             bridgeToken={bridgeToken}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
             onOpenGit={handleOpenChatGit}
             onOpenLocalPreview={openBrowser}
             onOpenBridgeRecoveryGuide={handleOpenBridgeRecoveryGuide}
@@ -1491,7 +1837,6 @@ export default function App() {
           <SettingsScreen
             api={activeApi}
             ws={activeWs}
-            bridgeUrl={bridgeUrl}
             activeBridgeProfileId={activeBridgeProfile?.id ?? null}
             bridgeProfileName={activeBridgeProfile?.name ?? 'Current bridge'}
             bridgeProfiles={bridgeProfiles}
@@ -1503,17 +1848,22 @@ export default function App() {
             onApprovalModeChange={handleApprovalModeChange}
             showToolCalls={showToolCalls}
             onShowToolCallsChange={handleShowToolCallsChange}
+            workspaceChatLimit={workspaceChatLimit}
+            onWorkspaceChatLimitChange={handleWorkspaceChatLimitChange}
             appearancePreference={appearancePreference}
+            darkUiPalette={darkUiPalette}
             onAppearancePreferenceChange={handleAppearancePreferenceChange}
+            onDarkUiPaletteChange={handleDarkUiPaletteChange}
             fontPreference={fontPreference}
             onFontPreferenceChange={handleFontPreferenceChange}
             onEditBridgeProfile={handleEditBridgeProfile}
             onAddBridgeProfile={handleAddBridgeProfile}
             onSwitchBridgeProfile={handleSwitchBridgeProfile}
+            onRenameBridgeProfile={handleRenameBridgeProfile}
+            onDeleteBridgeProfile={handleDeleteBridgeProfile}
             onClearSavedBridges={handleClearSavedBridges}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
             onDrawerGestureEnabledChange={setSettingsAllowsDrawerGesture}
-            onOpenBrowser={openBrowser}
             onOpenPrivacy={openPrivacy}
             onOpenTerms={openTerms}
           />
@@ -1524,7 +1874,7 @@ export default function App() {
             ref={browserRef}
             api={activeApi}
             bridgeUrl={bridgeUrl}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
             recentTargetUrls={recentBrowserTargetUrls}
             onRecentTargetUrlsChange={handleRecentBrowserTargetUrlsChange}
             pendingTargetUrl={pendingBrowserTargetUrl}
@@ -1535,14 +1885,14 @@ export default function App() {
         return (
           <PrivacyScreen
             policyUrl={env.privacyPolicyUrl}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
           />
         );
       case 'Terms':
         return (
           <TermsScreen
             termsUrl={env.termsOfServiceUrl}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
           />
         );
       default:
@@ -1553,7 +1903,7 @@ export default function App() {
             ws={activeWs}
             bridgeUrl={bridgeUrl}
             bridgeToken={bridgeToken}
-            onOpenDrawer={openDrawer}
+            onOpenDrawer={handleNavigationToggle}
             onOpenGit={handleOpenChatGit}
             onOpenLocalPreview={openBrowser}
             onOpenBridgeRecoveryGuide={handleOpenBridgeRecoveryGuide}
@@ -1584,14 +1934,39 @@ export default function App() {
             barStyle={theme.statusBarStyle}
             backgroundColor={theme.colors.bgMain}
           />
-          <View style={styles.root}>
+          <View style={[styles.root, usesTabletLayout && styles.tabletShell]}>
+            {usesTabletLayout ? (
+              <Animated.View
+                layout={tabletLayoutTransition}
+                pointerEvents={tabletSidebarVisible ? 'auto' : 'none'}
+                style={[
+                  styles.tabletSidebarClip,
+                  { width: tabletSidebarVisible ? TABLET_SIDEBAR_WIDTH : 0 },
+                ]}
+              >
+                <View style={styles.tabletSidebarContent}>
+                  <DrawerContent
+                    api={activeApi}
+                    ws={activeWs}
+                    active
+                    workspaceChatLimit={workspaceChatLimit}
+                    selectedChatId={selectedChatId}
+                    onSelectChat={handleSelectChat}
+                    onNewChat={handleNewChat}
+                    onNavigate={navigate}
+                  />
+                </View>
+              </Animated.View>
+            ) : null}
             <GestureDetector gesture={openDrawerGesture}>
               <Animated.View
+                layout={usesTabletLayout ? tabletLayoutTransition : undefined}
                 pointerEvents={drawerVisible && drawerCapturesTouches ? 'none' : 'auto'}
                 style={[
                   styles.screenFrame,
+                  usesTabletLayout && styles.tabletScreenFrame,
                   screenFrameAnimatedStyle,
-                  { width: screenWidth },
+                  usesTabletLayout ? null : { width: screenWidth },
                 ]}
               >
                 {renderScreen()}
@@ -1606,36 +1981,39 @@ export default function App() {
               </Animated.View>
             </GestureDetector>
 
-            <View
-              pointerEvents={drawerVisible && drawerCapturesTouches ? 'auto' : 'none'}
-              style={styles.drawerLayer}
-            >
-              <GestureDetector gesture={visibleDrawerGesture}>
-                <View style={styles.drawerGestureSurface}>
-                  <GestureDetector gesture={visibleDrawerTapGesture}>
-                    <Animated.View style={[styles.overlay, overlayAnimatedStyle]} />
-                  </GestureDetector>
+            {!usesTabletLayout ? (
+              <View
+                pointerEvents={drawerVisible && drawerCapturesTouches ? 'auto' : 'none'}
+                style={styles.drawerLayer}
+              >
+                <GestureDetector gesture={visibleDrawerGesture}>
+                  <View style={styles.drawerGestureSurface}>
+                    <GestureDetector gesture={visibleDrawerTapGesture}>
+                      <Animated.View style={[styles.overlay, overlayAnimatedStyle]} />
+                    </GestureDetector>
 
-                  <Animated.View style={[styles.drawer, drawerAnimatedStyle]}>
-                    <Animated.View
-                      style={[styles.drawerContentShell, drawerContentAnimatedStyle]}
-                    >
-                      <DrawerContent
-                        api={activeApi}
-                        ws={activeWs}
-                        active={drawerVisible}
-                        selectedChatId={selectedChatId}
-                        onSelectChat={handleSelectChat}
-                        onNewChat={handleNewChat}
-                        onNavigate={navigate}
-                      />
+                    <Animated.View style={[styles.drawer, { width: drawerWidth }, drawerAnimatedStyle]}>
+                      <Animated.View
+                        style={[styles.drawerContentShell, drawerContentAnimatedStyle]}
+                      >
+                        <DrawerContent
+                          api={activeApi}
+                          ws={activeWs}
+                          active={drawerVisible}
+                          workspaceChatLimit={workspaceChatLimit}
+                          selectedChatId={selectedChatId}
+                          onSelectChat={handleSelectChat}
+                          onNewChat={handleNewChat}
+                          onNavigate={navigate}
+                        />
+                      </Animated.View>
                     </Animated.View>
-                  </Animated.View>
-                </View>
-              </GestureDetector>
-            </View>
+                  </View>
+                </GestureDetector>
+              </View>
+            ) : null}
 
-            {currentScreen === 'ChatGit' ? (
+            {currentScreen === 'ChatGit' && !usesTabletLayout ? (
               <GestureDetector gesture={chatGitBackGesture}>
                 <View
                   pointerEvents={drawerVisible && drawerCapturesTouches ? 'none' : 'auto'}
@@ -1693,7 +2071,7 @@ function normalizeChatEngine(value: unknown): ChatEngine | null {
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'codex' || normalized === 'opencode') {
+  if (normalized === 'codex' || normalized === 'opencode' || normalized === 'cursor') {
     return normalized;
   }
 
@@ -1707,6 +2085,10 @@ function createEmptyEngineDefaultSettingsMap(): EngineDefaultSettingsMap {
       effort: null,
     },
     opencode: {
+      modelId: null,
+      effort: null,
+    },
+    cursor: {
       modelId: null,
       effort: null,
     },
@@ -1737,38 +2119,44 @@ function normalizeApprovalMode(value: unknown): ApprovalMode {
   return value === 'yolo' ? 'yolo' : 'normal';
 }
 
-function clampDrawerOffset(value: number): number {
-  'worklet';
-  return Math.max(-DRAWER_WIDTH, Math.min(0, value));
+function getDrawerWidth(screenWidth: number): number {
+  const targetWidth = screenWidth * DRAWER_SCREEN_RATIO;
+  return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, targetWidth));
 }
 
-function getDrawerOpenProgress(value: number): number {
+function clampDrawerOffset(value: number, drawerWidth: number): number {
   'worklet';
-  return (clampDrawerOffset(value) + DRAWER_WIDTH) / DRAWER_WIDTH;
+  return Math.max(-drawerWidth, Math.min(0, value));
 }
 
-function applyDrawerRubberBand(value: number): number {
+function getDrawerOpenProgress(value: number, drawerWidth: number): number {
+  'worklet';
+  return (clampDrawerOffset(value, drawerWidth) + drawerWidth) / drawerWidth;
+}
+
+function applyDrawerRubberBand(value: number, drawerWidth: number): number {
   'worklet';
   if (value > 0) {
     return value * DRAWER_RUBBER_BAND_STRENGTH;
   }
 
-  if (value < -DRAWER_WIDTH) {
-    return -DRAWER_WIDTH + (value + DRAWER_WIDTH) * DRAWER_RUBBER_BAND_STRENGTH;
+  if (value < -drawerWidth) {
+    return -drawerWidth + (value + drawerWidth) * DRAWER_RUBBER_BAND_STRENGTH;
   }
 
   return value;
 }
 
-function projectDrawerOffset(value: number, velocityX: number): number {
+function projectDrawerOffset(value: number, velocityX: number, drawerWidth: number): number {
   'worklet';
-  return clampDrawerOffset(value + velocityX * DRAWER_VELOCITY_PROJECTION);
+  return clampDrawerOffset(value + velocityX * DRAWER_VELOCITY_PROJECTION, drawerWidth);
 }
 
 function shouldSettleDrawerOpen(
   value: number,
   velocityX: number,
-  startOffset = -DRAWER_WIDTH
+  drawerWidth: number,
+  startOffset: number
 ): boolean {
   'worklet';
   if (velocityX >= DRAWER_SNAP_VELOCITY) {
@@ -1779,8 +2167,11 @@ function shouldSettleDrawerOpen(
     return false;
   }
 
-  const projectedProgress = getDrawerOpenProgress(projectDrawerOffset(value, velocityX));
-  const startedOpen = getDrawerOpenProgress(startOffset) > 0.5;
+  const projectedProgress = getDrawerOpenProgress(
+    projectDrawerOffset(value, velocityX, drawerWidth),
+    drawerWidth
+  );
+  const startedOpen = getDrawerOpenProgress(startOffset, drawerWidth) > 0.5;
   const settleThreshold = startedOpen
     ? 1 - DRAWER_SNAP_OPEN_PROGRESS
     : DRAWER_SNAP_OPEN_PROGRESS;
@@ -1813,6 +2204,22 @@ const createStyles = (theme: ReturnType<typeof createAppTheme>) =>
     screen: {
       flex: 1,
     },
+    tabletShell: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.bgMain,
+    },
+    tabletSidebarClip: {
+      width: TABLET_SIDEBAR_WIDTH,
+      overflow: 'hidden',
+      backgroundColor: theme.colors.bgSidebar,
+    },
+    tabletSidebarContent: {
+      width: TABLET_SIDEBAR_WIDTH,
+      flex: 1,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgSidebar,
+    },
     screenFrame: {
       flex: 1,
       backgroundColor: theme.colors.bgMain,
@@ -1820,6 +2227,13 @@ const createStyles = (theme: ReturnType<typeof createAppTheme>) =>
       borderCurve: 'continuous',
       shadowColor: theme.colors.shadow,
       shadowOffset: { width: 0, height: 16 },
+    },
+    tabletScreenFrame: {
+      width: undefined,
+      borderRadius: 0,
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0,
     },
     chatTransitionOverlay: {
       ...StyleSheet.absoluteFillObject,
@@ -1864,7 +2278,6 @@ const createStyles = (theme: ReturnType<typeof createAppTheme>) =>
       top: 0,
       left: 0,
       bottom: 0,
-      width: DRAWER_WIDTH,
       zIndex: 20,
     },
     drawerContentShell: {

@@ -2,7 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -L)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -L)"
+PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -L)"
+ROOT_DIR="${CLAWDEX_WORKSPACE_ROOT:-${INIT_CWD:-$(pwd -L)}}"
+if [[ ! -d "$ROOT_DIR" ]]; then
+  ROOT_DIR="$PACKAGE_ROOT"
+fi
 
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD="$(tput bold)"
@@ -33,6 +37,7 @@ declare -a SELECTED_ENGINES=()
 ENGINE_SELECTION_PRESET="false"
 AUTO_START="true"
 SECURE_ENV_FILE="$ROOT_DIR/.env.secure"
+CURSOR_CONFIG_NEEDS_WRITE="false"
 MENU_RESULT=""
 MENU_MULTI_RESULT=""
 MENU_MULTI_PRESELECTED=""
@@ -82,9 +87,9 @@ Usage: $(basename "$0") [options]
 
 Options:
   --no-start               Configure everything but do not start bridge
-  --engine <codex|opencode>
+  --engine <codex|opencode|cursor>
                            Select a single harness non-interactively
-  --engines <codex,opencode>
+  --engines <codex,opencode,cursor>
                            Select one or more harnesses non-interactively
   -h, --help               Show this help
 EOF
@@ -92,7 +97,7 @@ EOF
 
 validate_engine_name() {
   case "$1" in
-    codex|opencode)
+    codex|opencode|cursor)
       return 0
       ;;
     *)
@@ -105,6 +110,9 @@ format_engine_name() {
   case "$1" in
     opencode)
       printf 'OpenCode'
+      ;;
+    cursor)
+      printf 'Cursor'
       ;;
     *)
       printf 'Codex'
@@ -247,6 +255,9 @@ engine_from_menu_label() {
     "OpenCode")
       printf 'opencode'
       ;;
+    "Cursor")
+      printf 'cursor'
+      ;;
     *)
       return 1
       ;;
@@ -291,12 +302,12 @@ parse_args() {
         ;;
       --engine)
         if (($# < 2)); then
-          echo "error: --engine requires a value ('codex' or 'opencode')." >&2
+          echo "error: --engine requires a value ('codex', 'opencode', or 'cursor')." >&2
           print_usage >&2
           exit 1
         fi
         if ! validate_engine_name "$2"; then
-          echo "error: unsupported engine '$2'. Use 'codex' or 'opencode'." >&2
+          echo "error: unsupported engine '$2'. Use 'codex', 'opencode', or 'cursor'." >&2
           print_usage >&2
           exit 1
         fi
@@ -307,12 +318,12 @@ parse_args() {
         ;;
       --engines)
         if (($# < 2)); then
-          echo "error: --engines requires a comma-separated value (for example: codex,opencode)." >&2
+          echo "error: --engines requires a comma-separated value (for example: codex,opencode,cursor)." >&2
           print_usage >&2
           exit 1
         fi
         if ! parse_engine_list_csv "$2"; then
-          echo "error: unsupported --engines value '$2'. Use one or more of 'codex' and 'opencode'." >&2
+          echo "error: unsupported --engines value '$2'. Use one or more of 'codex', 'opencode', and 'cursor'." >&2
           print_usage >&2
           exit 1
         fi
@@ -912,6 +923,25 @@ prompt_manual_ipv4() {
   done
 }
 
+prompt_secret_value() {
+  local prompt="$1"
+  local value=""
+
+  while true; do
+    printf "%s %s %s " "$RAIL_GLYPH" "$RAIL_BRANCH" "$prompt" >&2
+    IFS= read -rs value || abort_wizard
+    printf "\n" >&2
+    value="$(printf '%s' "$value" | tr -d '\r\n')"
+
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+
+    printf "%s %s %s\n" "$RAIL_GLYPH" "$RAIL_CHILD" "${YELLOW}Value cannot be empty.${RESET}" >&2
+  done
+}
+
 extract_env_value() {
   local file="$1"
   local key="$2"
@@ -978,6 +1008,7 @@ print_existing_setup_summary() {
   local port=""
   local token=""
   local network_mode=""
+  local connect_url=""
   local harnesses=""
   local source_path=""
   local saved_active_engine="$ACTIVE_ENGINE"
@@ -995,6 +1026,7 @@ print_existing_setup_summary() {
   port="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_PORT")"
   token="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_AUTH_TOKEN")"
   network_mode="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_NETWORK_MODE")"
+  connect_url="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_CONNECT_URL")"
   harnesses="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_ENABLED_ENGINES")"
   if [[ -n "$harnesses" ]] && ! parse_existing_engine_list_csv "$harnesses"; then
     harnesses=""
@@ -1018,6 +1050,9 @@ print_existing_setup_summary() {
   echo "bridge.port: $port"
   if [[ -n "$network_mode" ]]; then
     echo "bridge.networkMode: $network_mode"
+  fi
+  if [[ -n "$connect_url" ]]; then
+    echo "bridge.connectUrl: $connect_url"
   fi
   if [[ -n "$harnesses" ]]; then
     echo "bridge.harnesses: $harnesses"
@@ -1124,9 +1159,15 @@ choose_runtime_engine() {
     fi
     MENU_MULTI_PRESELECTED+="OpenCode"
   fi
+  if selected_engines_contains "cursor"; then
+    if [[ -n "$MENU_MULTI_PRESELECTED" ]]; then
+      MENU_MULTI_PRESELECTED+=","
+    fi
+    MENU_MULTI_PRESELECTED+="Cursor"
+  fi
 
   info "Select the harnesses this phone should control."
-  menu_multiselect "Harnesses to control" "Codex" "OpenCode"
+  menu_multiselect "Harnesses to control" "Codex" "OpenCode" "Cursor"
   SELECTED_ENGINES=()
   for label in "${MENU_MULTI_RESULT_ITEMS[@]}"; do
     SELECTED_ENGINES+=("$(engine_from_menu_label "$label")")
@@ -1143,6 +1184,11 @@ infer_network_mode_from_host() {
     return 0
   fi
   printf '%s' "local"
+}
+
+infer_network_mode() {
+  local host="$1"
+  infer_network_mode_from_host "$host"
 }
 
 ensure_core_tools() {
@@ -1246,6 +1292,82 @@ ensure_opencode_cli() {
   fi
 }
 
+ensure_cursor_app_server() {
+  local existing_app_server_bin=""
+  local existing_api_key=""
+  local existing_model=""
+  local provided_app_server_bin="${CURSOR_APP_SERVER_BIN:-}"
+  local provided_api_key="${CURSOR_API_KEY:-}"
+  local resolved_cursor_app_server_bin=""
+
+  existing_app_server_bin="$(extract_env_value "$SECURE_ENV_FILE" "CURSOR_APP_SERVER_BIN")"
+
+  if [[ -n "$provided_app_server_bin" ]]; then
+    resolved_cursor_app_server_bin="$CURSOR_APP_SERVER_BIN"
+  elif [[ -n "$existing_app_server_bin" ]]; then
+    resolved_cursor_app_server_bin="$existing_app_server_bin"
+  elif command -v cursor-app-server >/dev/null 2>&1; then
+    resolved_cursor_app_server_bin="$(command -v cursor-app-server)"
+  fi
+
+  if [[ -z "$resolved_cursor_app_server_bin" ]]; then
+    abort_wizard "cursor-app-server was not found. Upgrade clawdex-mobile so npm links the bundled command, then rerun: clawdex init --engine cursor"
+  fi
+
+  if [[ "$resolved_cursor_app_server_bin" == */* ]]; then
+    if [[ ! -x "$resolved_cursor_app_server_bin" ]]; then
+      abort_wizard "cursor-app-server was configured as '$resolved_cursor_app_server_bin', but that file is not executable."
+    fi
+  elif ! command -v "$resolved_cursor_app_server_bin" >/dev/null 2>&1; then
+    abort_wizard "cursor-app-server command '$resolved_cursor_app_server_bin' was not found in PATH."
+  fi
+
+  CURSOR_APP_SERVER_BIN="$resolved_cursor_app_server_bin"
+  ok "Found cursor-app-server: $CURSOR_APP_SERVER_BIN"
+  if [[ "$CURSOR_APP_SERVER_BIN" != "$existing_app_server_bin" ]]; then
+    CURSOR_CONFIG_NEEDS_WRITE="true"
+  fi
+
+  existing_api_key="$(extract_env_value "$SECURE_ENV_FILE" "CURSOR_API_KEY")"
+  existing_model="$(extract_env_value "$SECURE_ENV_FILE" "CURSOR_MODEL")"
+  CURSOR_API_KEY="${CURSOR_API_KEY:-$existing_api_key}"
+  CURSOR_MODEL="${CURSOR_MODEL:-$existing_model}"
+
+  if [[ -n "$CURSOR_API_KEY" ]]; then
+    if [[ -n "$provided_api_key" ]]; then
+      ok "Cursor API key: provided from environment."
+      if [[ "$provided_api_key" != "$existing_api_key" ]]; then
+        CURSOR_CONFIG_NEEDS_WRITE="true"
+      fi
+    else
+      ok "Cursor API key: configured in secure bridge config."
+    fi
+    if [[ "$FLOW" == "manual" ]] && confirm_prompt "Replace saved Cursor API key now?" "N"; then
+      print_note_box "Cursor API key" "Create a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, then paste it here.
+Cursor docs: https://docs.cursor.com/en/cli/reference/authentication
+
+This is the Cursor agent/SDK key used by Clawdex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
+      CURSOR_API_KEY="$(prompt_secret_value "Enter Cursor API key:")"
+      CURSOR_CONFIG_NEEDS_WRITE="true"
+      ok "Cursor API key will be updated in $SECURE_ENV_FILE."
+    fi
+  else
+    warn "Cursor requires a Cursor API key on the bridge host."
+    print_note_box "Cursor API key" "Create a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, then paste it here.
+Cursor docs: https://docs.cursor.com/en/cli/reference/authentication
+
+This is the Cursor agent/SDK key used by Clawdex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
+    if ! confirm_prompt "Add Cursor API key now?" "Y"; then
+      abort_wizard "Cursor was selected but CURSOR_API_KEY is missing. Re-run clawdex init after creating a Cursor API key."
+    fi
+    CURSOR_API_KEY="$(prompt_secret_value "Enter Cursor API key:")"
+    CURSOR_CONFIG_NEEDS_WRITE="true"
+    ok "Cursor API key will be saved in $SECURE_ENV_FILE."
+  fi
+
+  export CURSOR_APP_SERVER_BIN CURSOR_API_KEY CURSOR_MODEL
+}
+
 ensure_selected_engine_clis() {
   local engine=""
 
@@ -1260,6 +1382,9 @@ ensure_selected_engine_clis() {
         ;;
       opencode)
         ensure_opencode_cli
+        ;;
+      cursor)
+        ensure_cursor_app_server
         ;;
       *)
         abort_wizard "Unsupported harness '$engine'."
@@ -1634,8 +1759,7 @@ ensure_core_tools
 if has_packaged_bridge_binary; then
   ok "Found packaged Rust bridge binary for this host."
 else
-  info "No packaged bridge binary found for this host. Falling back to local Rust build."
-  ensure_local_rust_build_toolchain
+  abort_wizard "No packaged bridge binary found for this host. Reinstall clawdex-mobile so npm installs the bundled bridge binary, then rerun setup."
 fi
 
 section "Config handling"
@@ -1693,8 +1817,9 @@ else
   ok "Keeping existing secure config."
   NETWORK_MODE="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_NETWORK_MODE")"
   BRIDGE_HOST="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_HOST")"
+  BRIDGE_CONNECT_URL="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_CONNECT_URL")"
   if [[ -z "$NETWORK_MODE" ]]; then
-    NETWORK_MODE="$(infer_network_mode_from_host "$BRIDGE_HOST")"
+    NETWORK_MODE="$(infer_network_mode "$BRIDGE_HOST" "$BRIDGE_CONNECT_URL")"
   fi
 
   if [[ "$BRIDGE_HOST" == "0.0.0.0" ]] || [[ "$BRIDGE_HOST" == "::" ]] || [[ "$BRIDGE_HOST" == "[::]" ]]; then
@@ -1715,6 +1840,9 @@ else
     section "Write secure config"
     BRIDGE_NETWORK_MODE="$NETWORK_MODE" BRIDGE_HOST_OVERRIDE="$BRIDGE_HOST" BRIDGE_ACTIVE_ENGINE="$ACTIVE_ENGINE" BRIDGE_ENABLED_ENGINES="$(selected_engines_csv)" "$SCRIPT_DIR/setup-secure-dev.sh"
   elif [[ "$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_ENABLED_ENGINES")" != "$(selected_engines_csv)" ]]; then
+    section "Write secure config"
+    BRIDGE_NETWORK_MODE="$NETWORK_MODE" BRIDGE_HOST_OVERRIDE="$BRIDGE_HOST" BRIDGE_ACTIVE_ENGINE="$ACTIVE_ENGINE" BRIDGE_ENABLED_ENGINES="$(selected_engines_csv)" "$SCRIPT_DIR/setup-secure-dev.sh"
+  elif [[ "$CURSOR_CONFIG_NEEDS_WRITE" == "true" ]]; then
     section "Write secure config"
     BRIDGE_NETWORK_MODE="$NETWORK_MODE" BRIDGE_HOST_OVERRIDE="$BRIDGE_HOST" BRIDGE_ACTIVE_ENGINE="$ACTIVE_ENGINE" BRIDGE_ENABLED_ENGINES="$(selected_engines_csv)" "$SCRIPT_DIR/setup-secure-dev.sh"
   fi
@@ -1738,15 +1866,17 @@ BRIDGE_HOST="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_HOST")"
 BRIDGE_PORT="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_PORT")"
 BRIDGE_TOKEN="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_AUTH_TOKEN")"
 NETWORK_MODE="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_NETWORK_MODE")"
+BRIDGE_CONNECT_URL="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_CONNECT_URL")"
 if [[ -z "$NETWORK_MODE" ]]; then
-  NETWORK_MODE="$(infer_network_mode_from_host "$BRIDGE_HOST")"
+  NETWORK_MODE="$(infer_network_mode "$BRIDGE_HOST" "$BRIDGE_CONNECT_URL")"
 fi
 BRIDGE_HOST="${BRIDGE_HOST:-${TAILSCALE_IP:-127.0.0.1}}"
 BRIDGE_PORT="${BRIDGE_PORT:-8787}"
+DISPLAY_BRIDGE_URL="${BRIDGE_CONNECT_URL:-http://$BRIDGE_HOST:$BRIDGE_PORT}"
 
 section "Summary"
 rail_echo "Bridge mode: $NETWORK_MODE"
-rail_echo "Bridge endpoint: http://$BRIDGE_HOST:$BRIDGE_PORT"
+rail_echo "Bridge endpoint: $DISPLAY_BRIDGE_URL"
 rail_echo "Harnesses: $(format_selected_engines)"
 rail_echo "Secure env: $SECURE_ENV_FILE"
 if [[ "$FLOW" == "quickstart" ]]; then
@@ -1766,7 +1896,7 @@ fi
 section "Next steps"
 if [[ "$AUTO_START" == "true" ]]; then
   rail_echo "1) Open the mobile app and use onboarding to connect."
-  rail_echo "Bridge URL: http://$BRIDGE_HOST:$BRIDGE_PORT"
+  rail_echo "Bridge URL: $DISPLAY_BRIDGE_URL"
   if [[ -n "$BRIDGE_TOKEN" ]]; then
     rail_echo "Bridge token: $BRIDGE_TOKEN"
   fi

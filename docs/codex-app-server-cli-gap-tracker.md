@@ -44,7 +44,7 @@ Status: In progress (first implementation pass completed)
 
 ### Remaining inside Gap 1
 - Native execution of dynamic tool calls (`item/tool/call`) is still not implemented in mobile/bridge; currently returns `success: false`.
-- Token refresh relies on environment variables; no mobile UI flow exists yet for account token refresh.
+- External `chatgptAuthTokens` refresh still relies on environment variables or the legacy bridge token cache.
 
 ## Remaining Gaps (Beyond Gap 1)
 
@@ -61,8 +61,8 @@ Status: In progress (first implementation pass completed)
 - Mobile Settings now exposes read-only account state via `account/read`, including ChatGPT email + plan type when available.
 - Remaining:
   - no dedicated standalone account screen outside Settings
-  - login/logout is not user-driven in mobile UI yet
-  - auth refresh is still operationally env-driven in bridge, not user-driven in app
+  - login/logout is not fully user-driven across the rest of mobile UI yet
+  - external `chatgptAuthTokens` refresh is still operationally env/cache-driven in bridge
   - no API-key entry flow in mobile UI
 
 ### Gap 4: MCP + Tooling UX

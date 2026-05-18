@@ -22,12 +22,25 @@ let qrcodeTerminalLoaded = false;
 let qrcodeTerminalLoadError = null;
 let pairingQrRenderError = null;
 
-function resolveRootDir() {
-  let rootDir = process.env.INIT_CWD ? path.resolve(process.env.INIT_CWD) : path.resolve(__dirname, "..");
-  if (!fs.existsSync(path.join(rootDir, "package.json"))) {
-    rootDir = path.resolve(__dirname, "..");
+function resolvePackageDir() {
+  return path.resolve(__dirname, "..");
+}
+
+function resolveWorkspaceDir() {
+  const candidates = [
+    process.env.CLAWDEX_WORKSPACE_ROOT,
+    process.env.INIT_CWD,
+    process.cwd(),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.trim()) {
+      continue;
+    }
+    return path.resolve(candidate);
   }
-  return rootDir;
+
+  return resolvePackageDir();
 }
 
 function readEnvFile(filePath) {
@@ -79,6 +92,64 @@ function buildBridgeUrl(host, port) {
   return `http://${formatHostForUrl(host)}:${port}`;
 }
 
+function parsePort(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function normalizeBaseUrl(rawUrl) {
+  const trimmed = String(rawUrl ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+    if (!parsed.hostname || parsed.username || parsed.password) {
+      return "";
+    }
+
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+    parsed.pathname = normalizedPath || "";
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.username = "";
+    parsed.password = "";
+
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function resolveBridgeBuildProfile(env) {
+  const explicitProfile = readNonEmptyEnv(env, "CLAWDEX_BRIDGE_BUILD_PROFILE").toLowerCase();
+  if (explicitProfile === "debug" || explicitProfile === "release") {
+    return explicitProfile;
+  }
+
+  return "release";
+}
+
+function resolveBridgeAccessUrl(env, endpoint) {
+  const configured = normalizeBaseUrl(readNonEmptyEnv(env, "BRIDGE_CONNECT_URL"));
+  if (configured) {
+    return configured;
+  }
+
+  if (isUnspecifiedBindHost(endpoint.host)) {
+    return "";
+  }
+
+  return buildBridgeUrl(endpoint.host, endpoint.port);
+}
+
 function isUnspecifiedBindHost(host) {
   const normalized = String(host || "").trim().toLowerCase();
   return normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]";
@@ -86,13 +157,14 @@ function isUnspecifiedBindHost(host) {
 
 function buildPairingPayload(env, endpoint) {
   const token = readNonEmptyEnv(env, "BRIDGE_AUTH_TOKEN");
-  if (!token || isUnspecifiedBindHost(endpoint.host)) {
+  const bridgeUrl = resolveBridgeAccessUrl(env, endpoint);
+  if (!token || !bridgeUrl) {
     return null;
   }
 
   return JSON.stringify({
     type: "clawdex-bridge-pair",
-    bridgeUrl: buildBridgeUrl(endpoint.host, endpoint.port),
+    bridgeUrl,
     bridgeToken: token,
   });
 }
@@ -151,9 +223,7 @@ function printPairingQr(env, endpoint) {
     console.log("");
     console.log("Bridge token QR fallback (scan from mobile onboarding):");
     qr.generate(tokenPayload, { small: true });
-    console.log(
-      `Full pairing QR unavailable because BRIDGE_HOST=${endpoint.host} is a bind address. Enter URL manually in onboarding.`
-    );
+    console.log("Full pairing QR unavailable because no phone-connectable bridge URL was resolved. Enter URL manually in onboarding.");
     console.log("");
     return true;
   } catch (error) {
@@ -200,12 +270,16 @@ function shouldShowPairingQr(env) {
 }
 
 function printBridgeAccessDetails(env, endpoint) {
-  const bridgeUrl = buildBridgeUrl(endpoint.host, endpoint.port);
-  console.log(`Bridge URL: ${bridgeUrl}`);
+  const bridgeUrl = resolveBridgeAccessUrl(env, endpoint);
+  console.log(`Bridge URL: ${bridgeUrl || "not resolved automatically"}`);
 
   const token = readNonEmptyEnv(env, "BRIDGE_AUTH_TOKEN");
   if (token) {
     console.log(`Bridge token: ${token}`);
+  }
+
+  if (!bridgeUrl || bridgeUrl !== buildBridgeUrl(endpoint.host, endpoint.port)) {
+    console.log(`Bridge bind: ${buildBridgeUrl(endpoint.host, endpoint.port)}`);
   }
 
   return bridgeUrl;
@@ -303,48 +377,6 @@ function commandExists(command) {
   return result.status === 0;
 }
 
-function walkFiles(directory) {
-  const entries = fs.readdirSync(directory, { withFileTypes: true });
-  const files = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...walkFiles(entryPath));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(entryPath);
-    }
-  }
-
-  return files;
-}
-
-function isBuiltBinaryFresh(rootDir, binaryPath) {
-  if (!fs.existsSync(binaryPath)) {
-    return false;
-  }
-
-  const binaryMtime = fs.statSync(binaryPath).mtimeMs;
-  const watchPaths = [
-    path.join(rootDir, "services", "rust-bridge", "Cargo.toml"),
-    path.join(rootDir, "services", "rust-bridge", "Cargo.lock"),
-  ];
-  const sourceDir = path.join(rootDir, "services", "rust-bridge", "src");
-
-  if (fs.existsSync(sourceDir)) {
-    watchPaths.push(...walkFiles(sourceDir));
-  }
-
-  return watchPaths.every((watchPath) => {
-    if (!fs.existsSync(watchPath)) {
-      return true;
-    }
-    return fs.statSync(watchPath).mtimeMs <= binaryMtime;
-  });
-}
-
 function printMissingCompilerHint() {
   if (process.platform === "win32") {
     console.error("Install Visual Studio Build Tools (Desktop development with C++) and Rust, then retry.");
@@ -377,10 +409,17 @@ function spawnAndRelay(command, args, options) {
     ...options,
   });
 
+  const env = options?.env ?? process.env;
+  const healthTimeoutMs = options?.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
+
   child.on("error", (error) => {
     console.error(`error: failed to start ${command}: ${error.message}`);
     process.exit(1);
   });
+
+  if (child.pid) {
+    void waitForHealth(env, child.pid, healthTimeoutMs).catch(() => {});
+  }
 
   child.on("exit", (code, signal) => {
     if (signal) {
@@ -464,11 +503,14 @@ async function spawnDetachedAndWait(command, args, options) {
   }
 }
 
-function buildBridgeFromSource(rootDir, env) {
+function buildBridgeFromSource(packageDir, env, profile) {
   const cargoCmd = "cargo";
-  const args = ["build", "--release", "--locked"];
+  const args = ["build", "--locked"];
+  if (profile === "release") {
+    args.push("--release");
+  }
   const result = spawnSync(cargoCmd, args, {
-    cwd: path.join(rootDir, "services", "rust-bridge"),
+    cwd: path.join(packageDir, "services", "rust-bridge"),
     env,
     stdio: "inherit",
   });
@@ -483,7 +525,9 @@ function buildBridgeFromSource(rootDir, env) {
   }
 }
 
-function resolveLaunch(rootDir, env, { devMode, forceSourceBuild }) {
+function resolveLaunch(workspaceDir, packageDir, env, { devMode, forceSourceBuild }) {
+  const defaultHealthTimeoutMs = DEFAULT_HEALTH_TIMEOUT_MS;
+
   if (devMode) {
     if (!commandExists("cargo")) {
       console.error("error: missing Rust/Cargo toolchain for dev bridge mode.");
@@ -493,7 +537,7 @@ function resolveLaunch(rootDir, env, { devMode, forceSourceBuild }) {
     return {
       command: "cargo",
       args: ["run"],
-      cwd: path.join(rootDir, "services", "rust-bridge"),
+      cwd: path.join(packageDir, "services", "rust-bridge"),
       env,
       healthTimeoutMs: DEV_HEALTH_TIMEOUT_MS,
     };
@@ -509,39 +553,35 @@ function resolveLaunch(rootDir, env, { devMode, forceSourceBuild }) {
     return {
       command: overrideBinary,
       args: [],
-      cwd: rootDir,
+      cwd: workspaceDir,
       env,
-      healthTimeoutMs: DEFAULT_HEALTH_TIMEOUT_MS,
+      healthTimeoutMs: defaultHealthTimeoutMs,
     };
   }
 
-  const packagedBinary = packagedBinaryPath(rootDir, resolveRuntimeTarget());
+  const buildProfile = resolveBridgeBuildProfile(env);
+  const packagedBinary = packagedBinaryPath(packageDir, resolveRuntimeTarget());
   if (!forceSourceBuild && packagedBinary && fs.existsSync(packagedBinary)) {
     ensureExecutable(packagedBinary);
     return {
       command: packagedBinary,
       args: [],
-      cwd: rootDir,
+      cwd: workspaceDir,
       env,
-      healthTimeoutMs: DEFAULT_HEALTH_TIMEOUT_MS,
+      healthTimeoutMs: defaultHealthTimeoutMs,
     };
   }
 
-  const builtBinary = builtBinaryPath(rootDir, os.platform());
-  if (isBuiltBinaryFresh(rootDir, builtBinary)) {
-    ensureExecutable(builtBinary);
-    return {
-      command: builtBinary,
-      args: [],
-      cwd: rootDir,
-      env,
-      healthTimeoutMs: DEFAULT_HEALTH_TIMEOUT_MS,
-    };
+  const builtBinary = builtBinaryPath(packageDir, os.platform(), buildProfile);
+
+  if (!forceSourceBuild) {
+    console.error("error: no packaged bridge binary was found for this host.");
+    console.error("Reinstall a published clawdex-mobile package with bundled bridge binaries.");
+    process.exit(1);
   }
 
   if (!commandExists("cargo")) {
-    console.error("error: no packaged bridge binary was found for this host, and cargo is not installed.");
-    console.error("Reinstall a published clawdex-mobile package with bundled bridge binaries, or install Rust and retry.");
+    console.error("error: CLAWDEX_BRIDGE_FORCE_SOURCE_BUILD=true was set, but cargo is not installed.");
     process.exit(1);
   }
 
@@ -551,7 +591,7 @@ function resolveLaunch(rootDir, env, { devMode, forceSourceBuild }) {
     process.exit(1);
   }
 
-  buildBridgeFromSource(rootDir, env);
+  buildBridgeFromSource(packageDir, env, buildProfile);
 
   if (!fs.existsSync(builtBinary)) {
     console.error(`error: expected built bridge binary at ${builtBinary}, but it was not created.`);
@@ -562,35 +602,47 @@ function resolveLaunch(rootDir, env, { devMode, forceSourceBuild }) {
   return {
     command: builtBinary,
     args: [],
-    cwd: rootDir,
+    cwd: workspaceDir,
     env,
-    healthTimeoutMs: DEFAULT_HEALTH_TIMEOUT_MS,
+    healthTimeoutMs: defaultHealthTimeoutMs,
   };
 }
 
 async function start() {
-  const rootDir = resolveRootDir();
-  const secureEnvFile = path.join(rootDir, ".env.secure");
+  const workspaceDir = resolveWorkspaceDir();
+  const packageDir = resolvePackageDir();
+  const secureEnvFile = path.join(workspaceDir, ".env.secure");
   if (!fs.existsSync(secureEnvFile)) {
     console.error(`error: ${secureEnvFile} not found. Run: npm run secure:setup`);
     process.exit(1);
   }
 
   const fileEnv = readEnvFile(secureEnvFile);
-  const env = { ...fileEnv, ...process.env };
+  const env = {
+    ...process.env,
+    ...fileEnv,
+    CLAWDEX_WORKSPACE_ROOT: workspaceDir,
+    INIT_CWD: process.env.INIT_CWD || workspaceDir,
+  };
   const devMode = process.argv.includes("--dev") || env.BRIDGE_RUN_MODE === "dev";
   if (devMode) {
     env.BRIDGE_RUN_MODE = "dev";
   }
   const backgroundMode = process.argv.includes("--background");
+  const prepareOnly = process.argv.includes("--prepare-only");
   const forceSourceBuild = env.CLAWDEX_BRIDGE_FORCE_SOURCE_BUILD === "true";
-  const launch = resolveLaunch(rootDir, env, { devMode, forceSourceBuild });
+  const launch = resolveLaunch(workspaceDir, packageDir, env, { devMode, forceSourceBuild });
+
+  if (prepareOnly) {
+    console.log(`Bridge binary ready: ${launch.command}`);
+    return;
+  }
 
   if (backgroundMode) {
     await spawnDetachedAndWait(launch.command, launch.args, {
       cwd: launch.cwd,
       env: launch.env,
-      rootDir,
+      rootDir: workspaceDir,
       healthTimeoutMs: launch.healthTimeoutMs,
     });
     return;

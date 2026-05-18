@@ -11,9 +11,12 @@ import {
   normalizeFontPreference,
   type FontPreference,
 } from './fonts';
-import type { AppearancePreference } from './theme';
+import type { AppearancePreference, DarkUiPalette } from './theme';
 
-export const APP_SETTINGS_VERSION = 8;
+export const APP_SETTINGS_VERSION = 10;
+export const DEFAULT_WORKSPACE_CHAT_LIMIT = 5;
+export const WORKSPACE_CHAT_LIMIT_OPTIONS = [5, 10, 25, null] as const;
+export type WorkspaceChatLimit = (typeof WORKSPACE_CHAT_LIMIT_OPTIONS)[number];
 
 export function parseAppSettings(raw: string): {
   bridgeUrl: string | null;
@@ -24,7 +27,9 @@ export function parseAppSettings(raw: string): {
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
   appearancePreference: AppearancePreference;
+  darkUiPalette: DarkUiPalette;
   fontPreference: FontPreference;
+  workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
 } {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
@@ -37,7 +42,9 @@ export function parseAppSettings(raw: string): {
       approvalMode: 'yolo',
       showToolCalls: true,
       appearancePreference: 'system',
+      darkUiPalette: 'classic',
       fontPreference: DEFAULT_FONT_PREFERENCE,
+      workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
   }
@@ -55,6 +62,8 @@ export function parseAppSettings(raw: string): {
         parsedVersion !== 5 &&
         parsedVersion !== 6 &&
         parsedVersion !== 7 &&
+        parsedVersion !== 8 &&
+        parsedVersion !== 9 &&
         parsedVersion !== APP_SETTINGS_VERSION)
     ) {
       return {
@@ -66,7 +75,9 @@ export function parseAppSettings(raw: string): {
         approvalMode: 'yolo',
         showToolCalls: true,
         appearancePreference: 'system',
+        darkUiPalette: 'classic',
         fontPreference: DEFAULT_FONT_PREFERENCE,
+        workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
       };
     }
@@ -106,8 +117,14 @@ export function parseAppSettings(raw: string): {
         (parsed as { appearancePreference?: unknown }).appearancePreference,
         parsedVersion === 4 ? 'dark' : 'system'
       ),
+      darkUiPalette: normalizeStoredDarkUiPalette(
+        (parsed as { darkUiPalette?: unknown }).darkUiPalette
+      ),
       fontPreference: normalizeFontPreference(
         (parsed as { fontPreference?: unknown }).fontPreference
+      ),
+      workspaceChatLimit: normalizeWorkspaceChatLimit(
+        (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit
       ),
       recentBrowserTargetUrls: normalizeBrowserTargetUrls(
         (parsed as { recentBrowserTargetUrls?: unknown }).recentBrowserTargetUrls
@@ -123,10 +140,16 @@ export function parseAppSettings(raw: string): {
       approvalMode: 'yolo',
       showToolCalls: true,
       appearancePreference: 'system',
+      darkUiPalette: 'classic',
       fontPreference: DEFAULT_FONT_PREFERENCE,
+      workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
   }
+}
+
+export function formatWorkspaceChatLimit(value: WorkspaceChatLimit): string {
+  return value === null ? 'All chats' : `${value} chats`;
 }
 
 function normalizeBridgeUrl(value: unknown): string | null {
@@ -155,6 +178,25 @@ function normalizeDefaultStartCwd(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeWorkspaceChatLimit(value: unknown): WorkspaceChatLimit {
+  if (value === null || value === 'all') {
+    return null;
+  }
+
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number.parseInt(value.trim(), 10)
+        : Number.NaN;
+
+  return numericValue === 10 || numericValue === 25
+    ? numericValue
+    : numericValue === 5
+      ? 5
+      : DEFAULT_WORKSPACE_CHAT_LIMIT;
+}
+
 function normalizeModelId(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -170,7 +212,7 @@ function normalizeChatEngine(value: unknown): ChatEngine | null {
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'codex' || normalized === 'opencode') {
+  if (normalized === 'codex' || normalized === 'opencode' || normalized === 'cursor') {
     return normalized;
   }
 
@@ -196,6 +238,10 @@ function createEmptyEngineDefaultSettingsMap(): EngineDefaultSettingsMap {
       modelId: null,
       effort: null,
     },
+    cursor: {
+      modelId: null,
+      effort: null,
+    },
   };
 }
 
@@ -207,7 +253,7 @@ function normalizeEngineDefaultSettingsMap(
   const base = createEmptyEngineDefaultSettingsMap();
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
-  for (const engine of ['codex', 'opencode'] as const) {
+  for (const engine of ['codex', 'opencode', 'cursor'] as const) {
     const entry =
       record && typeof record[engine] === 'object'
         ? (record[engine] as Record<string, unknown>)
@@ -275,6 +321,10 @@ function normalizeStoredApprovalMode(value: unknown): ApprovalMode {
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
+}
+
+function normalizeStoredDarkUiPalette(value: unknown): DarkUiPalette {
+  return value === 'grey' ? 'grey' : 'classic';
 }
 
 function normalizeStoredAppearancePreference(

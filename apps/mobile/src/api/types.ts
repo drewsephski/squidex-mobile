@@ -1,5 +1,5 @@
 export type ChatStatus = 'idle' | 'running' | 'error' | 'complete';
-export type ChatEngine = 'codex' | 'opencode';
+export type ChatEngine = 'codex' | 'opencode' | 'cursor';
 
 export interface EngineDefaultSettings {
   modelId: string | null;
@@ -77,7 +77,7 @@ export interface CreateChatRequest {
   approvalPolicy?: ApprovalPolicy;
 }
 
-export type CollaborationMode = 'default' | 'plan';
+export type CollaborationMode = 'default' | 'plan' | 'ask';
 
 export interface SendChatMessageRequest {
   content: string;
@@ -173,6 +173,7 @@ export interface FileSystemListRequest {
   path?: string | null;
   includeHidden?: boolean;
   directoriesOnly?: boolean;
+  includeGitRepo?: boolean;
 }
 
 export interface FileSystemEntry {
@@ -240,6 +241,26 @@ export interface AccountSnapshot {
   requiresOpenaiAuth: boolean;
 }
 
+export type AccountLoginStartResponse =
+  | {
+      type: 'apiKey';
+    }
+  | {
+      type: 'chatgpt';
+      loginId: string;
+      authUrl: string;
+      userCode?: string | null;
+    }
+  | {
+      type: 'chatgptDeviceCode';
+      loginId: string;
+      verificationUrl: string;
+      userCode: string;
+    }
+  | {
+      type: 'chatgptAuthTokens';
+    };
+
 export type ApprovalPolicy =
   | 'untrusted'
   | 'on-request'
@@ -259,6 +280,7 @@ export interface ModelOption {
   description?: string;
   providerId?: string;
   providerName?: string;
+  contextWindow?: number;
   connected?: boolean;
   authRequired?: boolean;
   hidden?: boolean;
@@ -282,6 +304,26 @@ export interface TerminalExecResponse {
   stderr: string;
   timedOut: boolean;
   durationMs: number;
+}
+
+export interface GitHubAuthInstallRequest {
+  accessToken?: string;
+  repositories?: string[];
+  grants?: GitHubAuthGrantInput[];
+}
+
+export interface GitHubAuthGrantInput {
+  accessToken: string;
+  repositories?: string[];
+}
+
+export interface GitHubAuthInstallResponse {
+  installed: boolean;
+  host: string;
+  login: string | null;
+  scopes: string[];
+  credentialFile: string;
+  grantsInstalled: number;
 }
 
 export interface GitStatusResponse {
@@ -319,6 +361,18 @@ export interface GitHistoryCommit {
 
 export interface GitHistoryResponse {
   commits: GitHistoryCommit[];
+  cwd?: string;
+}
+
+export interface GitBranchSummary {
+  name: string;
+  remote: boolean;
+  current: boolean;
+}
+
+export interface GitBranchesResponse {
+  branches: GitBranchSummary[];
+  current?: string | null;
   cwd?: string;
 }
 
@@ -386,6 +440,20 @@ export interface GitCommitResponse {
   stdout: string;
   stderr: string;
   committed: boolean;
+  cwd?: string;
+}
+
+export interface GitSwitchRequest {
+  branch: string;
+  cwd?: string;
+}
+
+export interface GitSwitchResponse {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  switched: boolean;
+  branch: string;
   cwd?: string;
 }
 
@@ -472,6 +540,106 @@ export interface ResolveUserInputResponse {
   request: PendingUserInputRequest;
 }
 
+export type BridgeUiPresentation = 'workflowCard' | 'modal' | 'banner';
+export type BridgeUiActionStyle = 'primary' | 'secondary' | 'destructive';
+export type BridgeUiTone = 'neutral' | 'info' | 'success' | 'warning' | 'error';
+
+export interface BridgeUiTextBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface BridgeUiMarkdownBlock {
+  type: 'markdown';
+  markdown: string;
+}
+
+export interface BridgeUiChecklistItem {
+  label: string;
+  status?: 'pending' | 'inProgress' | 'completed';
+  detail?: string;
+}
+
+export interface BridgeUiChecklistBlock {
+  type: 'checklist';
+  items: BridgeUiChecklistItem[];
+}
+
+export interface BridgeUiKeyValueItem {
+  label: string;
+  value: string;
+}
+
+export interface BridgeUiKeyValueBlock {
+  type: 'keyValue';
+  items: BridgeUiKeyValueItem[];
+}
+
+export interface BridgeUiCodeBlock {
+  type: 'code';
+  text: string;
+  language?: string | null;
+}
+
+export interface BridgeUiProgressBlock {
+  type: 'progress';
+  label: string;
+  value: number;
+  max: number;
+  detail?: string | null;
+}
+
+export type BridgeUiBlock =
+  | BridgeUiTextBlock
+  | BridgeUiMarkdownBlock
+  | BridgeUiChecklistBlock
+  | BridgeUiKeyValueBlock
+  | BridgeUiCodeBlock
+  | BridgeUiProgressBlock;
+
+export interface BridgeUiAction {
+  id: string;
+  label: string;
+  style?: BridgeUiActionStyle;
+  dismissesSurface?: boolean;
+}
+
+export interface BridgeUiSurface {
+  id: string;
+  threadId: string;
+  turnId?: string | null;
+  kind?: string | null;
+  presentation: BridgeUiPresentation;
+  tone?: BridgeUiTone;
+  title: string;
+  subtitle?: string | null;
+  bodyMarkdown?: string | null;
+  blocks: BridgeUiBlock[];
+  actions: BridgeUiAction[];
+  dismissible?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface ResolveBridgeUiSurfaceRequest {
+  threadId: string;
+  turnId?: string | null;
+  actionId: string;
+}
+
+export interface ResolveBridgeUiSurfaceResponse {
+  ok: true;
+  id: string;
+  threadId: string;
+  actionId: string;
+}
+
+export interface DismissBridgeUiSurfaceResponse {
+  ok: true;
+  id: string;
+  threadId?: string | null;
+}
+
 export type TurnPlanStepStatus = 'pending' | 'inProgress' | 'completed';
 
 export interface TurnPlanStep {
@@ -515,13 +683,31 @@ export interface BridgeCapabilities {
     commandOutputDelta: boolean;
     selfUpdate: boolean;
     browserPreview: boolean;
+    genericUiSurface: boolean;
   };
+}
+
+export interface BridgeDeviceConnection {
+  clientId: number;
+  clientType: string;
+  clientName: string;
+  connectedAt: string;
+  lastSeenAt: string;
+}
+
+export interface BridgeStatus {
+  status: 'ok';
+  at: string;
+  uptimeSec: number;
+  connectedClients: number;
+  devices: BridgeDeviceConnection[];
 }
 
 export interface BrowserPreviewSession {
   sessionId: string;
   targetUrl: string;
   previewPort: number;
+  previewBaseUrl?: string | null;
   bootstrapPath: string;
   createdAt: string;
   lastAccessedAt: string;
@@ -560,6 +746,19 @@ export interface BridgeRuntimeInfo {
   updaterStatus?: BridgeUpdaterStatus | null;
 }
 
+export interface CursorCredentialStatus {
+  configured: boolean;
+  valid: boolean | null;
+  source: 'env' | null;
+  apiKeyName: string | null;
+  userEmail: string | null;
+  createdAt: string | null;
+  enabled: boolean;
+  runtimeAvailable: boolean;
+  active: boolean;
+  error: string | null;
+}
+
 export interface BridgeUpdateStartResponse {
   ok: boolean;
   jobId: string;
@@ -573,6 +772,11 @@ export interface BridgeRestartStartResponse {
   jobId: string;
   message: string;
   logPath?: string | null;
+}
+
+export interface CodexAppServerRestartResponse {
+  ok: boolean;
+  message: string;
 }
 
 export interface RpcNotification {

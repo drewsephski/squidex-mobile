@@ -1,7 +1,7 @@
 {
   "name": "clawdex-mobile",
-  "version": "5.1.2",
-  "description": "Private-network mobile bridge and CLI for Codex and OpenCode",
+  "version": "5.2.0",
+  "description": "Private-network mobile bridge and CLI for Codex, OpenCode, and Cursor",
   "keywords": [
     "codex",
     "opencode",
@@ -20,10 +20,13 @@
     "access": "public"
   },
   "dependencies": {
-    "qrcode-terminal": "^0.12.0"
+    "@cursor/sdk": "1.0.11",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^3.25.0"
   },
   "bin": {
-    "clawdex": "./bin/clawdex.js"
+    "clawdex": "bin/clawdex.js",
+    "cursor-app-server": "services/cursor-app-server/dist/stdio.js"
   },
   "files": [
     "CHANGELOG.md",
@@ -38,6 +41,9 @@
     "scripts/setup-wizard.sh",
     "scripts/start-bridge-secure.js",
     "scripts/stop-services.sh",
+    "services/cursor-app-server/dist",
+    "services/cursor-app-server/README.md",
+    "services/cursor-app-server/package.json",
     "services/rust-bridge/Cargo.lock",
     "services/rust-bridge/Cargo.toml",
     "services/rust-bridge/src",
@@ -51,7 +57,15 @@
     "mobile": "./scripts/start-expo.sh mobile",
     "ios": "./scripts/start-expo.sh ios",
     "android": "./scripts/start-expo.sh android",
+    "desktop:mac": "swift run --package-path apps/macos ClawdexDesktop",
+    "desktop:mac:build": "swift build --package-path apps/macos",
+    "desktop:mac:bundle": "./scripts/build-macos-desktop-app.sh",
+    "desktop:mac:sign": "./scripts/sign-macos-desktop-app.sh",
+    "desktop:mac:notarize": "./scripts/notarize-macos-desktop-app.sh",
+    "stack:lan": "./scripts/start-mobile-stack-lan.sh",
+    "stack:tailscale": "./scripts/start-mobile-stack-tailscale.sh",
     "bridge": "BRIDGE_WORKDIR=$(pwd) npm run -w @codex/rust-bridge dev",
+    "bridge:ui:demo": "node ./scripts/send-bridge-ui-demo.js",
     "bridge:package:stage-current": "node ./scripts/bridge-binary.js stage-current",
     "setup:wizard": "./scripts/setup-wizard.sh",
     "stop:services": "./scripts/stop-services.sh",
@@ -60,10 +74,11 @@
     "secure:bridge:dev": "node ./scripts/start-bridge-secure.js --dev",
     "bridge:ts": "BRIDGE_WORKDIR=$(pwd) npm run -w @codex/mac-bridge dev",
     "version:sync": "node scripts/sync-versions.js",
+    "prepack": "npm run build -w @clawdex/cursor-app-server",
     "build": "npm run --workspaces build",
     "typecheck": "npm run --workspaces typecheck",
     "lint": "npm run --workspaces lint",
-    "test": "npm run test -w @codex/mac-bridge && npm run test -w apps/mobile && npm run test -w @codex/rust-bridge",
+    "test": "npm run test -w @codex/mac-bridge && npm run test -w apps/mobile && npm run test -w @codex/rust-bridge && npm run test -w @clawdex/cursor-app-server",
     "teardown": "./scripts/teardown.sh"
   }
 }

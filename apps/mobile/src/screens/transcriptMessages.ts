@@ -14,6 +14,9 @@ export type TranscriptDisplayItem =
     }
   | ToolTranscriptGroup;
 
+/** Keeps each tool card bounded so very long runs don’t dominate the transcript. */
+export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
+
 export function getVisibleTranscriptMessages(
   messages: ChatMessage[],
   showToolCalls: boolean
@@ -44,30 +47,10 @@ export function getVisibleTranscriptMessages(
     return true;
   });
 
-  return filtered.filter((msg, index) => {
-    if (msg.role !== 'assistant') {
-      return true;
-    }
-
-    const next = filtered[index + 1];
-    if (!next || next.role !== 'assistant') {
-      return true;
-    }
-
-    return (
-      assistantMessageHasInlineMedia(msg.content) ||
-      assistantMessageHasInlineMedia(next.content)
-    );
-  });
+  return filtered;
 }
 
-function assistantMessageHasInlineMedia(content: string): boolean {
-  return /^\[(?:image|local image):\s*.+?\]$/im.test(content);
-}
-
-export function buildTranscriptDisplayItems(
-  messages: ChatMessage[]
-): TranscriptDisplayItem[] {
+export function buildTranscriptDisplayItems(messages: ChatMessage[]): TranscriptDisplayItem[] {
   const items: TranscriptDisplayItem[] = [];
   let toolBuffer: ChatMessage[] = [];
   let userMessageOrdinal = 0;
@@ -77,27 +60,22 @@ export function buildTranscriptDisplayItems(
       return;
     }
 
-    if (toolBuffer.length === 1) {
-      items.push({
-        kind: 'message',
-        message: toolBuffer[0],
-        renderKey: toolBuffer[0]?.id ?? 'tool-message',
-      });
-    } else {
-      items.push({
-        kind: 'toolGroup',
-        id: `tool-group-${toolBuffer[0]?.id ?? 'start'}-${toolBuffer[toolBuffer.length - 1]?.id ?? 'end'}`,
-        messages: toolBuffer,
-      });
-    }
+    items.push({
+      kind: 'toolGroup',
+      id: `tool-group-${toolBuffer[0]?.id ?? 'start'}-${toolBuffer[toolBuffer.length - 1]?.id ?? 'end'}`,
+      messages: [...toolBuffer],
+    });
 
     toolBuffer = [];
   };
 
   for (const message of messages) {
-    const isToolMessage = message.role === 'system' && message.systemKind === 'tool';
+    const isToolMessage = isToolTranscriptMessage(message);
     if (isToolMessage) {
       toolBuffer.push(message);
+      if (toolBuffer.length >= MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP) {
+        flushToolBuffer();
+      }
       continue;
     }
 
@@ -114,6 +92,37 @@ export function buildTranscriptDisplayItems(
 
   flushToolBuffer();
   return items;
+}
+
+function isToolTranscriptMessage(message: ChatMessage): boolean {
+  if (message.role !== 'system') {
+    return false;
+  }
+
+  if (message.systemKind === 'tool') {
+    return true;
+  }
+
+  if (message.systemKind) {
+    return false;
+  }
+
+  return isLegacyToolTimelineContent(message.content);
+}
+
+function isLegacyToolTimelineContent(content: string): boolean {
+  const firstContentLine = content
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  const title = firstContentLine?.match(/^•\s+(.+)$/)?.[1]?.trim();
+  if (!title) {
+    return false;
+  }
+
+  return !/^(reasoning|thinking|spawned sub-agent|spawning sub-agent|sub-agent|waiting on sub-agent|sent follow-up to sub-agent|closed sub-agent thread|updated sub-agent thread|task|compacted conversation context|conversation compacted)\b/i.test(
+    title
+  );
 }
 
 function buildTranscriptRenderKey(message: ChatMessage, userMessageOrdinal: number): string {

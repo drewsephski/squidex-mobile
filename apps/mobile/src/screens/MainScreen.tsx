@@ -3,9 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  type ComponentProps,
   forwardRef,
-  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -18,8 +16,7 @@ import {
   AppState,
   ActivityIndicator,
   Dimensions,
-  FlatList,
-  InteractionManager,
+  type FlatList,
   Keyboard,
   KeyboardAvoidingView,
   type KeyboardEvent,
@@ -27,12 +24,8 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
-  type ListRenderItem,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -45,11 +38,11 @@ import { getChatEngineLabel, resolveChatEngine } from '../chatEngines';
 import type {
   AccountRateLimitSnapshot,
   ApprovalMode,
-  ApprovalPolicy,
   ApprovalDecision,
   BridgeCapabilities,
+  BridgeUiAction,
+  BridgeUiSurface,
   BridgeQueuedMessage,
-  BridgeThreadQueueError,
   BridgeThreadQueueState,
   ChatEngine,
   CollaborationMode,
@@ -66,22 +59,29 @@ import type {
   LocalImageInput,
   ReasoningEffort,
   ServiceTier,
-  TurnPlanStep,
   ChatMessage as ChatTranscriptMessage,
   FileSystemEntry,
+  FileSystemListResponse,
   WorkspaceSummary,
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
-import { ActivityBar, type ActivityTone } from '../components/ActivityBar';
+import { ActivityBar } from '../components/ActivityBar';
 import { ApprovalBanner } from '../components/ApprovalBanner';
+import {
+  BridgeUiBanner,
+  BridgeUiModal,
+  BridgeUiWorkflowCard,
+} from '../components/BridgeUiSurface';
 import { ChatHeader } from '../components/ChatHeader';
 import { ChatInput } from '../components/ChatInput';
-import { ChatMessage, ToolActivityGroup } from '../components/ChatMessage';
 import { ComposerUsageLimits } from '../components/ComposerUsageLimits';
 import { BrandMark } from '../components/BrandMark';
 import { SelectionSheet, type SelectionSheetOption } from '../components/SelectionSheet';
 import { WorkspacePickerModal } from '../components/WorkspacePickerModal';
-import { buildComposerUsageLimitBadges } from '../components/usageLimitBadges';
+import {
+  buildComposerUsageLimitAlert,
+  buildComposerUsageLimitBadges,
+} from '../components/usageLimitBadges';
 import { env } from '../config';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import {
@@ -101,15 +101,157 @@ import {
 import {
   hasStructuredPlanCardContent,
   resolveWorkflowCardMode,
+  shouldCollapseWorkflowCardForKeyboard,
 } from './planCardState';
-import { trimInheritedParentMessages } from './subAgentTranscript';
+import type { TranscriptDisplayItem } from './transcriptMessages';
+import { useAppTheme } from '../theme';
+import { ChatTranscriptView } from './ChatTranscriptView';
+import { createStyles, createWorkflowMarkdownStyles } from './mainScreenStyles';
 import {
-  buildTranscriptDisplayItems,
-  getVisibleTranscriptMessages,
-  syncVisibleSubAgentStatuses,
-  type TranscriptDisplayItem,
-} from './transcriptMessages';
-import { useAppTheme, type AppTheme } from '../theme';
+  type ActivityState,
+  type ActivePlanState,
+  sleep,
+  type IdleTaskHandle,
+  scheduleIdleTask,
+  type PendingPlanImplementationPrompt,
+  type AttachmentMenuAction,
+  type WorkspacePickerPurpose,
+  type ThreadContextUsage,
+  type ThreadRuntimeSnapshot,
+  type ComposerAttachmentChip,
+  type PendingOptimisticUserMessage,
+  type PendingOptimisticQueuedMessage,
+  type AutoScrollState,
+  RUN_WATCHDOG_MS,
+  WORKSPACE_FAVORITES_VERSION,
+  WORKSPACE_FAVORITES_LIMIT,
+  ACTIVE_CHAT_SYNC_INTERVAL_MS,
+  IDLE_CHAT_SYNC_INTERVAL_MS,
+  BACKGROUND_CHAT_SYNC_INTERVAL_MS,
+  AGENT_THREADS_SYNC_INTERVAL_MS,
+  AGENT_THREADS_IDLE_SYNC_INTERVAL_MS,
+  AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS,
+  AGENT_THREADS_LIST_LIMIT,
+  APP_FOCUS_DISCONNECT_GRACE_MS,
+  ACTIVITY_DETAIL_HOLD_MS,
+  GENERIC_RUNNING_ACTIVITY_DELAY_MS,
+  CONTEXT_WINDOW_BASELINE_TOKENS,
+  GENERIC_RUNNING_ACTIVITY_TITLES,
+  CHAT_DRAFTS_VERSION,
+  CHAT_MODEL_PREFERENCES_VERSION,
+  CHAT_PLAN_SNAPSHOTS_VERSION,
+  CHAT_BRIDGE_UI_SURFACES_VERSION,
+  STREAMING_SCROLL_THROTTLE_MS,
+  PLAN_IMPLEMENTATION_TITLE,
+  PLAN_IMPLEMENTATION_YES,
+  PLAN_IMPLEMENTATION_NO,
+  PLAN_IMPLEMENTATION_CODING_MESSAGE,
+  CODEX_RUN_COMPLETION_EVENT_TYPES,
+  CODEX_RUN_ABORT_EVENT_TYPES,
+  CODEX_RUN_FAILURE_EVENT_TYPES,
+  EXTERNAL_RUNNING_STATUS_HINTS,
+  EXTERNAL_ERROR_STATUS_HINTS,
+  EXTERNAL_COMPLETE_STATUS_HINTS,
+  type ChatModelPreference,
+  type SelectedServiceTier,
+  SLASH_COMMANDS,
+  toRecord,
+  readString,
+  readNumber,
+  readIntegerLike,
+  mergeThreadContextUsage,
+  formatTokenCount,
+  buildNextPlanStateFromDelta,
+  buildNextPlanStateFromUpdate,
+  renderPlanStatusGlyph,
+  toTurnPlanUpdate,
+  resolveCodexPlanTurnId,
+  toCodexTurnPlanUpdate,
+  toPendingUserInputRequest,
+  buildUserInputDrafts,
+  normalizeQuestionAnswers,
+  normalizeWorkspacePath,
+  getWorkspaceBrowseCacheKey,
+  normalizeAttachmentPath,
+  normalizeCloneDirectoryName,
+  deriveCloneDirectoryName,
+  formatGitCloneFailureMessage,
+  joinWorkspacePath,
+  toMentionInput,
+  toOptimisticUserContent,
+  countUserMessages,
+  normalizeChatMessageMatchContent,
+  reconcileChatWithPendingOptimisticMessages,
+  toPathBasename,
+  toAttachmentPathSuggestions,
+  parseMentionQuery,
+  replaceActiveMentionQueryWithSelection,
+  draftContainsMentionLabel,
+  mergeChatEngines,
+  normalizeModelId,
+  normalizeReasoningEffort,
+  normalizeServiceTier,
+  toSelectedServiceTier,
+  resolveSelectedServiceTier,
+  toApprovalPolicyForMode,
+  getChatModelPreferencesPath,
+  getChatDraftsPath,
+  getChatPlanSnapshotsPath,
+  getChatBridgeUiSurfacesPath,
+  getWorkspaceFavoritesPath,
+  parseWorkspaceFavoritePaths,
+  parseChatDrafts,
+  parseBridgeThreadQueueState,
+  getDraftScopeKey,
+  parseChatModelPreferences,
+  parseChatPlanSnapshots,
+  parseChatBridgeUiSurfaces,
+  formatCollaborationModeLabel,
+  isBridgeConnectionErrorMessage,
+  buildRateLimitAlertFromMessages,
+  isRateLimitReachedMessage,
+  isBridgeRecoveryActivity,
+  resolveSnapshotCollaborationMode,
+  resolveDisplayedThreadPlan,
+  toPersistedActivePlanState,
+  resolveUndismissedPlanImplementationPrompt,
+  resolvePersistedPlanImplementationPrompt,
+  formatReasoningEffort,
+  shouldAutoEnablePlanModeFromChat,
+  parseSlashCommand,
+  parseSlashQuery,
+  findSlashCommandDefinition,
+  filterSlashCommands,
+  formatAgentThreadOptionTitle,
+  iconForAgentThread,
+  stripMarkdownInline,
+  toTickerSnippet,
+  mergeStreamingDelta,
+  formatLiveReasoningMessage,
+  formatLiveCursorToolMessage,
+  describeStartedToolEvent,
+  describeCompletedToolEvent,
+  describeWebSearchToolEvent,
+  appendRunEventHistory,
+  normalizeCodexEventType,
+  extractCodexFailureMessage,
+  isCodexRunHeartbeatEvent,
+  extractNotificationThreadId,
+  extractNotificationParentThreadId,
+  extractExternalStatusHint,
+  isChatSummaryLikelyRunning,
+  isChatLikelyRunning,
+  hasRecentUnansweredUserTurn,
+  didAssistantMessageProgress,
+  extractFirstBoldSnippet,
+  toReasoningActivityDetail,
+  toPendingApproval,
+  toBridgeUiSurface,
+  parseGoalSlashObjective,
+  buildOptimisticGoalBridgeUiSurface,
+  upsertBridgeUiSurfaceList,
+  removeBridgeUiSurfaceFromList
+} from './mainScreenHelpers';
 
 export interface MainScreenHandle {
   openChat: (id: string, optimisticChat?: Chat | null) => void;
@@ -143,360 +285,7 @@ const SUGGESTIONS = [
   'Write tests for the main module',
 ];
 const OPEN_CHAT_MIN_LOADING_MS = 250;
-
-interface ActivityState {
-  tone: ActivityTone;
-  title: string;
-  detail?: string;
-}
-
-interface ActivePlanState {
-  threadId: string;
-  turnId: string;
-  explanation: string | null;
-  steps: TurnPlanStep[];
-  deltaText: string;
-  updatedAt: string;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-interface PendingPlanImplementationPrompt {
-  threadId: string;
-  turnId: string;
-}
-
-type AttachmentMenuAction =
-  | 'workspace-path'
-  | 'phone-file'
-  | 'phone-image'
-  | 'phone-camera'
-  | null;
-
-type WorkspacePickerPurpose = 'default-start' | 'git-checkout-destination';
-
-interface ThreadContextUsage {
-  totalTokens: number | null;
-  lastTokens: number | null;
-  modelContextWindow: number | null;
-  updatedAtMs: number;
-}
-
-interface ThreadRuntimeSnapshot {
-  activity?: ActivityState;
-  activeCommands?: RunEvent[];
-  streamingText?: string | null;
-  pendingApproval?: PendingApproval | null;
-  pendingUserInputRequest?: PendingUserInputRequest | null;
-  queuedMessages?: BridgeQueuedMessage[];
-  queuedMessageError?: BridgeThreadQueueError | null;
-  contextUsage?: ThreadContextUsage | null;
-  plan?: ActivePlanState | null;
-  activeTurnId?: string | null;
-  runWatchdogUntil?: number;
-  updatedAtMs: number;
-}
-
-interface ComposerAttachmentChip {
-  id: string;
-  label: string;
-}
-
-interface PendingOptimisticUserMessage {
-  message: ChatTranscriptMessage;
-  userOrdinal: number;
-}
-
-interface PendingOptimisticQueuedMessage {
-  id: string;
-  content: string;
-  createdAt: string;
-}
-
-interface AutoScrollState {
-  shouldStickToBottom: boolean;
-  isUserInteracting: boolean;
-  isMomentumScrolling: boolean;
-}
-
-interface SlashCommandDefinition {
-  name: string;
-  summary: string;
-  argsHint?: string;
-  mobileSupported: boolean;
-  aliases?: string[];
-  availabilityNote?: string;
-}
-
-const MAX_ACTIVE_COMMANDS = 16;
-const RUN_WATCHDOG_MS = 60_000;
-const LARGE_CHAT_MESSAGE_COUNT_THRESHOLD = 120;
-const CHAT_INITIAL_VISIBLE_MESSAGE_WINDOW = 80;
-const CHAT_MESSAGE_PAGE_SIZE = 80;
-const LIKELY_RUNNING_RECENT_UPDATE_MS = 30_000;
-const UNANSWERED_USER_RUNNING_TTL_MS = 90_000;
-const ACTIVE_CHAT_SYNC_INTERVAL_MS = 2_000;
-const IDLE_CHAT_SYNC_INTERVAL_MS = 5_000;
-const BACKGROUND_CHAT_SYNC_INTERVAL_MS = 15_000;
-const AGENT_THREADS_SYNC_INTERVAL_MS = 10_000;
-const AGENT_THREADS_IDLE_SYNC_INTERVAL_MS = 20_000;
-const AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS = 30_000;
-const APP_FOCUS_DISCONNECT_GRACE_MS = 5_000;
-const ACTIVITY_DETAIL_HOLD_MS = 2_500;
-const GENERIC_RUNNING_ACTIVITY_DELAY_MS = 1_200;
-const CONTEXT_WINDOW_BASELINE_TOKENS = 5_000;
-const GENERIC_RUNNING_ACTIVITY_TITLES = new Set(['working', 'thinking']);
-const CHAT_DRAFTS_FILE = 'chat-drafts.json';
-const CHAT_DRAFTS_VERSION = 1;
-const CHAT_MODEL_PREFERENCES_FILE = 'chat-model-preferences.json';
-const CHAT_MODEL_PREFERENCES_VERSION = 1;
-const CHAT_PLAN_SNAPSHOTS_FILE = 'chat-plan-snapshots.json';
-const CHAT_PLAN_SNAPSHOTS_VERSION = 1;
-const CHAT_NEW_DRAFT_KEY = '__new_chat__';
-const STREAMING_SCROLL_THROTTLE_MS = 48;
-const PLAN_IMPLEMENTATION_TITLE = 'Implement this plan?';
-const PLAN_IMPLEMENTATION_YES = 'Yes, implement this plan';
-const PLAN_IMPLEMENTATION_NO = 'No, stay in Plan mode';
-const PLAN_IMPLEMENTATION_CODING_MESSAGE = 'Implement the plan.';
-const INLINE_OPTION_LINE_PATTERN =
-  /^(?:[-*+]\s*)?(?:\d{1,2}\s*[.):-]|\(\d{1,2}\)\s*[.):-]?|\[\d{1,2}\]\s*|[A-Ca-c]\s*[.):-]|\([A-Ca-c]\)\s*[.):-]?|option\s+\d{1,2}\s*[.):-]?)\s*(.+)$/i;
-const INLINE_CHOICE_CUE_PATTERNS = [
-  /\bchoose\b/i,
-  /\bselect\b/i,
-  /\bpick\b/i,
-  /\bwould you like\b/i,
-  /\bshould i\b/i,
-  /\bprefer\b/i,
-  /\bconfirm\b/i,
-  /\b(?:reply|respond)\s+with\b/i,
-  /\blet me know\b.*\b(which|what|option|one)\b/i,
-  /\bwhich\b.*\b(option|one)\b/i,
-  /\bwhat\b.*\b(option|one)\b/i,
-];
-const CODEX_RUN_HEARTBEAT_EVENT_TYPES = new Set([
-  'taskstarted',
-  'agentreasoningdelta',
-  'reasoningcontentdelta',
-  'reasoningrawcontentdelta',
-  'agentreasoningrawcontentdelta',
-  'agentreasoningsectionbreak',
-  'agentmessagedelta',
-  'agentmessagecontentdelta',
-  'execcommandbegin',
-  'execcommandend',
-  'mcpstartupupdate',
-  'mcptoolcallbegin',
-  'websearchbegin',
-  'backgroundevent',
-]);
-const CODEX_RUN_COMPLETION_EVENT_TYPES = new Set(['taskcomplete']);
-const CODEX_RUN_ABORT_EVENT_TYPES = new Set([
-  'turnaborted',
-  'taskinterrupted',
-]);
-const CODEX_RUN_FAILURE_EVENT_TYPES = new Set([
-  'taskfailed',
-  'turnfailed',
-]);
-const EXTERNAL_RUNNING_STATUS_HINTS = new Set([
-  'running',
-  'inprogress',
-  'active',
-  'queued',
-  'pending',
-]);
-const EXTERNAL_ERROR_STATUS_HINTS = new Set([
-  'failed',
-  'error',
-  'interrupted',
-  'aborted',
-]);
-const EXTERNAL_COMPLETE_STATUS_HINTS = new Set([
-  'complete',
-  'completed',
-  'success',
-  'succeeded',
-]);
-
-interface ChatModelPreference {
-  modelId: string | null;
-  effort: ReasoningEffort | null;
-  serviceTier: ServiceTier | null;
-  updatedAt: string;
-}
-
-type SelectedServiceTier = ServiceTier | null | undefined;
-
-const SLASH_COMMANDS: SlashCommandDefinition[] = [
-  {
-    name: 'permissions',
-    summary: 'Set approvals and sandbox permissions',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'sandbox-add-read-dir',
-    summary: 'Grant sandbox read access to extra directory',
-    argsHint: '<absolute-path>',
-    mobileSupported: false,
-    availabilityNote: 'Windows Codex CLI only.',
-  },
-  {
-    name: 'agent',
-    summary: 'Switch the active sub-agent thread',
-    argsHint: '[thread]',
-    mobileSupported: true,
-  },
-  {
-    name: 'apps',
-    summary: 'Browse and insert apps/connectors',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'compact',
-    summary: 'Compact current thread history',
-    mobileSupported: true,
-  },
-  {
-    name: 'diff',
-    summary: 'Open Git view for current chat',
-    mobileSupported: true,
-  },
-  {
-    name: 'exit',
-    summary: 'Exit Codex CLI',
-    mobileSupported: false,
-    availabilityNote: 'Not applicable on mobile.',
-  },
-  {
-    name: 'experimental',
-    summary: 'Toggle experimental features',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'feedback',
-    summary: 'Send feedback diagnostics',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'init',
-    summary: 'Generate AGENTS.md scaffold',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'logout',
-    summary: 'Sign out from Codex',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'mcp',
-    summary: 'List configured MCP tools',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'mention',
-    summary: 'Attach file/folder context to prompt',
-    argsHint: '<path>',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'model',
-    summary: 'Open model picker or set model by id',
-    argsHint: '<model-id>',
-    mobileSupported: true,
-  },
-  {
-    name: 'plan',
-    summary: 'Toggle plan mode or run next prompt in plan mode',
-    argsHint: '[prompt]',
-    mobileSupported: true,
-  },
-  {
-    name: 'personality',
-    summary: 'Set response personality',
-    argsHint: '<friendly|pragmatic|none>',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'ps',
-    summary: 'Show background terminal jobs',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'fork',
-    summary: 'Fork current conversation into a new chat',
-    mobileSupported: true,
-  },
-  {
-    name: 'resume',
-    summary: 'Resume a saved conversation',
-    mobileSupported: false,
-    availabilityNote: 'Use chat list on mobile for now.',
-  },
-  {
-    name: 'new',
-    summary: 'Start a new conversation',
-    mobileSupported: true,
-  },
-  {
-    name: 'quit',
-    summary: 'Exit Codex CLI',
-    mobileSupported: false,
-    aliases: ['exit'],
-    availabilityNote: 'Not applicable on mobile.',
-  },
-  {
-    name: 'review',
-    summary: 'Run review on uncommitted changes',
-    mobileSupported: true,
-  },
-  {
-    name: 'status',
-    summary: 'Show current session status',
-    mobileSupported: true,
-  },
-  {
-    name: 'debug-config',
-    summary: 'Inspect config layers and diagnostics',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'statusline',
-    summary: 'Configure footer status-line fields',
-    mobileSupported: false,
-    availabilityNote: 'Available in Codex CLI only right now.',
-  },
-  {
-    name: 'approvals',
-    summary: 'Alias for /permissions',
-    mobileSupported: false,
-    aliases: ['permissions'],
-    availabilityNote: 'Alias supported in CLI; use /permissions there.',
-  },
-  {
-    name: 'help',
-    summary: 'List slash commands',
-    mobileSupported: true,
-  },
-  {
-    name: 'rename',
-    summary: 'Rename current chat',
-    argsHint: '<new-name>',
-    mobileSupported: true,
-  },
-];
+const EMPTY_MODEL_OPTIONS: ModelOption[] = [];
 
 export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
   function MainScreen(
@@ -527,7 +316,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const { height: windowHeight } = useWindowDimensions();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const initialPendingSnapshot =
-      pendingOpenChatId && pendingOpenChatSnapshot?.id === pendingOpenChatId
+      pendingOpenChatId &&
+      pendingOpenChatSnapshot?.id === pendingOpenChatId &&
+      pendingOpenChatSnapshot.messages.length > 0
         ? pendingOpenChatSnapshot
         : null;
     const [selectedChat, setSelectedChat] = useState<Chat | null>(
@@ -558,6 +349,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const [userInputError, setUserInputError] = useState<string | null>(null);
     const [resolvingUserInput, setResolvingUserInput] = useState(false);
     const [activePlan, setActivePlan] = useState<ActivePlanState | null>(null);
+    const [activeBridgeUiSurfaces, setActiveBridgeUiSurfaces] = useState<BridgeUiSurface[]>([]);
     const streamingTextRef = useRef<string | null>(null);
     const setStreamingText = useCallback(
       (
@@ -600,7 +392,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       useState<WorkspacePickerPurpose>('default-start');
     const [workspaceRoots, setWorkspaceRoots] = useState<WorkspaceSummary[]>([]);
     const [workspaceBridgeRoot, setWorkspaceBridgeRoot] = useState<string | null>(null);
-    const [loadingWorkspaceRoots, setLoadingWorkspaceRoots] = useState(false);
+    const [, setLoadingWorkspaceRoots] = useState(false);
     const [workspaceBrowsePath, setWorkspaceBrowsePath] = useState<string | null>(null);
     const [workspaceBrowseParentPath, setWorkspaceBrowseParentPath] = useState<string | null>(
       null
@@ -608,6 +400,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const [workspaceBrowseEntries, setWorkspaceBrowseEntries] = useState<FileSystemEntry[]>([]);
     const [loadingWorkspaceBrowse, setLoadingWorkspaceBrowse] = useState(false);
     const [workspaceBrowseError, setWorkspaceBrowseError] = useState<string | null>(null);
+    const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
+    const workspaceBrowseRequestRef = useRef(0);
+    const [favoriteWorkspacePaths, setFavoriteWorkspacePaths] = useState<string[]>([]);
     const [resumeGitCheckoutAfterWorkspacePicker, setResumeGitCheckoutAfterWorkspacePicker] =
       useState(false);
     const [gitCheckoutModalVisible, setGitCheckoutModalVisible] = useState(false);
@@ -626,7 +421,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const [bridgeCapabilities, setBridgeCapabilities] = useState<BridgeCapabilities | null>(
       null
     );
-    const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+    const [modelOptionsByEngine, setModelOptionsByEngine] = useState<
+      Partial<Record<ChatEngine, ModelOption[]>>
+    >({});
     const [loadingModels, setLoadingModels] = useState(false);
     const [pendingChatEngine, setPendingChatEngine] = useState<ChatEngine>(
       () => defaultChatEngine ?? 'codex'
@@ -659,7 +456,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const [showDelayedGenericRunningActivity, setShowDelayedGenericRunningActivity] =
       useState(false);
     const [accountRateLimits, setAccountRateLimits] = useState<AccountRateLimitSnapshot | null>(
-      null
+      () => api.peekAccountRateLimits()
     );
     const accountRateLimitsRef = useRef<AccountRateLimitSnapshot | null>(null);
     accountRateLimitsRef.current = accountRateLimits;
@@ -677,7 +474,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const draftPersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const foregroundAgentRefreshHandleRef = useRef<{ cancel?: () => void } | null>(null);
+    const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);
     const [planPanelCollapsedByThread, setPlanPanelCollapsedByThread] = useState<
       Record<string, boolean>
     >({});
@@ -694,6 +491,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       isMomentumScrolling: false,
     });
     const loadChatRequestRef = useRef(0);
+    const modelOptionsRequestRef = useRef(0);
     const agentThreadsRequestRef = useRef(0);
     const agentThreadsRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const openAgentThreadSelectorRef = useRef<(query?: string | null) => Promise<boolean>>(
@@ -950,23 +748,28 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const chatModelPreferencesRef = useRef<Record<string, ChatModelPreference>>({});
     const [chatModelPreferencesLoaded, setChatModelPreferencesLoaded] = useState(false);
     const chatPlanSnapshotsRef = useRef<Record<string, ActivePlanState>>({});
+    const bridgeUiSurfaceSnapshotsRef = useRef<Record<string, BridgeUiSurface[]>>({});
     const [, setChatPlanSnapshotsLoaded] = useState(false);
+    const bridgeUiSurfacePersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+      null
+    );
     const preferredStartCwd = normalizeWorkspacePath(defaultStartCwd);
     const draftScopeKey = getDraftScopeKey(selectedChatId);
     const persistedDefaultChatEngine = resolveChatEngine(defaultChatEngine ?? 'codex');
-    const availableNewChatEngines: ChatEngine[] = bridgeCapabilities?.availableEngines?.length
-      ? bridgeCapabilities.availableEngines
-      : ['codex'];
-    const fallbackDefaultChatEngine = availableNewChatEngines.includes(persistedDefaultChatEngine)
-      ? persistedDefaultChatEngine
-      : availableNewChatEngines[0] ?? 'codex';
+    const availableNewChatEngines = mergeChatEngines(
+      bridgeCapabilities?.availableEngines ?? [],
+      bridgeCapabilities?.activeEngine
+    );
     const preferredNewChatEngine = availableNewChatEngines.includes(pendingChatEngine)
       ? pendingChatEngine
-      : fallbackDefaultChatEngine;
+      : availableNewChatEngines.includes(persistedDefaultChatEngine)
+        ? persistedDefaultChatEngine
+        : availableNewChatEngines[0] ?? 'codex';
     const activeChatEngine = selectedChat?.engine
       ? resolveChatEngine(selectedChat.engine)
       : preferredNewChatEngine;
     const activeChatEngineLabel = getChatEngineLabel(activeChatEngine);
+    const modelOptions = modelOptionsByEngine[activeChatEngine] ?? EMPTY_MODEL_OPTIONS;
     const pendingEngineDefaults = defaultEngineSettings?.[preferredNewChatEngine] ?? null;
     const preferredDefaultModelId = normalizeModelId(pendingEngineDefaults?.modelId);
     const preferredDefaultEffort = normalizeReasoningEffort(pendingEngineDefaults?.effort);
@@ -1003,6 +806,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         ),
       [attachmentFileCandidates, attachmentPathDraft, pendingMentionPaths]
     );
+
+    useEffect(() => {
+      if (activeChatEngine !== 'cursor' && selectedCollaborationMode === 'ask') {
+        setSelectedCollaborationMode('default');
+      }
+    }, [activeChatEngine, selectedCollaborationMode]);
 
     const queueOptimisticUserMessage = useCallback(
       (
@@ -1365,6 +1174,109 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       []
     );
 
+    const saveBridgeUiSurfaceSnapshots = useCallback(
+      async (nextSnapshots: Record<string, BridgeUiSurface[]>) => {
+        const snapshotsPath = getChatBridgeUiSurfacesPath();
+        if (!snapshotsPath) {
+          return;
+        }
+
+        const payload = JSON.stringify({
+          version: CHAT_BRIDGE_UI_SURFACES_VERSION,
+          entries: nextSnapshots,
+        });
+
+        try {
+          await FileSystem.writeAsStringAsync(snapshotsPath, payload);
+        } catch {
+          // Best effort persistence only.
+        }
+      },
+      []
+    );
+
+    const scheduleBridgeUiSurfaceSnapshotsPersist = useCallback(
+      (nextSnapshots: Record<string, BridgeUiSurface[]>) => {
+        const existingTimer = bridgeUiSurfacePersistenceTimeoutRef.current;
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+
+        bridgeUiSurfacePersistenceTimeoutRef.current = setTimeout(() => {
+          bridgeUiSurfacePersistenceTimeoutRef.current = null;
+          void saveBridgeUiSurfaceSnapshots(nextSnapshots);
+        }, 180);
+      },
+      [saveBridgeUiSurfaceSnapshots]
+    );
+
+    const saveWorkspaceFavorites = useCallback(async (paths: string[]) => {
+      const favoritesPath = getWorkspaceFavoritesPath();
+      if (!favoritesPath) {
+        return;
+      }
+
+      const payload = JSON.stringify({
+        version: WORKSPACE_FAVORITES_VERSION,
+        paths,
+      });
+
+      try {
+        await FileSystem.writeAsStringAsync(favoritesPath, payload);
+      } catch {
+        // Best effort persistence only.
+      }
+    }, []);
+
+    useEffect(() => {
+      let cancelled = false;
+
+      const load = async () => {
+        const favoritesPath = getWorkspaceFavoritesPath();
+        if (!favoritesPath) {
+          return;
+        }
+
+        try {
+          const raw = await FileSystem.readAsStringAsync(favoritesPath);
+          if (!cancelled) {
+            setFavoriteWorkspacePaths(parseWorkspaceFavoritePaths(raw));
+          }
+        } catch {
+          if (!cancelled) {
+            setFavoriteWorkspacePaths([]);
+          }
+        }
+      };
+
+      void load();
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    const toggleWorkspaceFavorite = useCallback(
+      (path: string | null | undefined) => {
+        const normalizedPath = normalizeWorkspacePath(path);
+        if (!normalizedPath) {
+          return;
+        }
+
+        setFavoriteWorkspacePaths((current) => {
+          const exists = current.includes(normalizedPath);
+          const next = exists
+            ? current.filter((entry) => entry !== normalizedPath)
+            : [
+                normalizedPath,
+                ...current.filter((entry) => entry !== normalizedPath),
+              ].slice(0, WORKSPACE_FAVORITES_LIMIT);
+          void saveWorkspaceFavorites(next);
+          return next;
+        });
+      },
+      [saveWorkspaceFavorites]
+    );
+
     useEffect(() => {
       let cancelled = false;
 
@@ -1445,6 +1357,17 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       };
     }, [saveChatDrafts]);
 
+    useEffect(() => {
+      return () => {
+        const existingTimer = bridgeUiSurfacePersistenceTimeoutRef.current;
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+          bridgeUiSurfacePersistenceTimeoutRef.current = null;
+        }
+        void saveBridgeUiSurfaceSnapshots(bridgeUiSurfaceSnapshotsRef.current);
+      };
+    }, [saveBridgeUiSurfaceSnapshots]);
+
     const rememberChatPlanSnapshot = useCallback(
       (chatId: string, plan: ActivePlanState | null) => {
         const normalizedChatId = chatId.trim();
@@ -1473,6 +1396,31 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         void saveChatPlanSnapshots(nextSnapshots);
       },
       [saveChatPlanSnapshots]
+    );
+
+    const rememberBridgeUiSurfaceSnapshots = useCallback(
+      (
+        chatId: string,
+        updater: (previous: BridgeUiSurface[]) => BridgeUiSurface[]
+      ) => {
+        const normalizedChatId = chatId.trim();
+        if (!normalizedChatId) {
+          return;
+        }
+
+        const previous = bridgeUiSurfaceSnapshotsRef.current[normalizedChatId] ?? [];
+        const nextSurfaces = updater(previous);
+        const nextSnapshots = { ...bridgeUiSurfaceSnapshotsRef.current };
+        if (nextSurfaces.length > 0) {
+          nextSnapshots[normalizedChatId] = nextSurfaces;
+        } else {
+          delete nextSnapshots[normalizedChatId];
+        }
+
+        bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
+        scheduleBridgeUiSurfaceSnapshotsPersist(nextSnapshots);
+      },
+      [scheduleBridgeUiSurfaceSnapshotsPersist]
     );
 
     const rememberChatModelPreference = useCallback(
@@ -1583,8 +1531,14 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       let cancelled = false;
 
       const load = async () => {
+        const cachedSnapshot = api.peekAccountRateLimits();
+        if (cachedSnapshot && !cancelled) {
+          accountRateLimitsRef.current = cachedSnapshot;
+          setAccountRateLimits(cachedSnapshot);
+        }
+
         try {
-          const snapshot = await api.readAccountRateLimits();
+          const snapshot = await api.readAccountRateLimits({ forceRefresh: true });
           if (!cancelled) {
             accountRateLimitsRef.current = snapshot;
             setAccountRateLimits(snapshot);
@@ -1772,6 +1726,68 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
     );
 
+    const cacheThreadBridgeUiSurface = useCallback(
+      (threadId: string, surface: BridgeUiSurface) => {
+        upsertThreadRuntimeSnapshot(threadId, (previous) => ({
+          bridgeUiSurfaces: upsertBridgeUiSurfaceList(
+            previous.bridgeUiSurfaces ?? [],
+            surface
+          ),
+        }));
+        rememberBridgeUiSurfaceSnapshots(threadId, (previous) =>
+          upsertBridgeUiSurfaceList(previous, surface)
+        );
+        bumpAgentRuntimeRevision();
+      },
+      [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    );
+
+    const removeThreadBridgeUiSurface = useCallback(
+      (surfaceId: string, threadId?: string | null) => {
+        if (threadId) {
+          upsertThreadRuntimeSnapshot(threadId, (previous) => ({
+            bridgeUiSurfaces: removeBridgeUiSurfaceFromList(
+              previous.bridgeUiSurfaces ?? [],
+              surfaceId
+            ),
+          }));
+          rememberBridgeUiSurfaceSnapshots(threadId, (previous) =>
+            removeBridgeUiSurfaceFromList(previous, surfaceId)
+          );
+        } else {
+          for (const [snapshotThreadId, snapshot] of Object.entries(
+            threadRuntimeSnapshotsRef.current
+          )) {
+            if (!snapshot.bridgeUiSurfaces?.some((surface) => surface.id === surfaceId)) {
+              continue;
+            }
+            upsertThreadRuntimeSnapshot(snapshotThreadId, (previous) => ({
+              bridgeUiSurfaces: removeBridgeUiSurfaceFromList(
+                previous.bridgeUiSurfaces ?? [],
+                surfaceId
+              ),
+            }));
+            rememberBridgeUiSurfaceSnapshots(snapshotThreadId, (previous) =>
+              removeBridgeUiSurfaceFromList(previous, surfaceId)
+            );
+          }
+        }
+        bumpAgentRuntimeRevision();
+      },
+      [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    );
+
+    const replaceThreadBridgeUiSurfaces = useCallback(
+      (threadId: string, surfaces: BridgeUiSurface[]) => {
+        upsertThreadRuntimeSnapshot(threadId, () => ({
+          bridgeUiSurfaces: surfaces,
+        }));
+        rememberBridgeUiSurfaceSnapshots(threadId, () => surfaces);
+        bumpAgentRuntimeRevision();
+      },
+      [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    );
+
     const cacheThreadQueueState = useCallback(
       (threadId: string, queueState: BridgeThreadQueueState | null) => {
         upsertThreadRuntimeSnapshot(threadId, () => ({
@@ -1890,6 +1906,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         if (!threadId) {
           setThreadContextUsage(null);
           setActivePlan(null);
+          setActiveBridgeUiSurfaces([]);
           setSelectedCollaborationMode('default');
           return;
         }
@@ -1898,6 +1915,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         if (!snapshot) {
           setThreadContextUsage(null);
           setActivePlan(null);
+          setActiveBridgeUiSurfaces([]);
           setSelectedCollaborationMode('default');
           return;
         }
@@ -1924,6 +1942,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
         setThreadContextUsage(snapshot.contextUsage ?? null);
         setActivePlan(snapshot.plan ?? null);
+        setActiveBridgeUiSurfaces(snapshot.bridgeUiSurfaces ?? []);
         if (snapshot.activeTurnId !== undefined) {
           setActiveTurnId(snapshot.activeTurnId);
         }
@@ -1975,6 +1994,57 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         } finally {
           if (!cancelled) {
             setChatPlanSnapshotsLoaded(true);
+          }
+        }
+      };
+
+      void load();
+      return () => {
+        cancelled = true;
+      };
+    }, [applyThreadRuntimeSnapshot, upsertThreadRuntimeSnapshot]);
+
+    useEffect(() => {
+      let cancelled = false;
+
+      const load = async () => {
+        const snapshotsPath = getChatBridgeUiSurfacesPath();
+        if (!snapshotsPath) {
+          return;
+        }
+
+        try {
+          const raw = await FileSystem.readAsStringAsync(snapshotsPath);
+          if (cancelled) {
+            return;
+          }
+
+          const parsedSnapshots = parseChatBridgeUiSurfaces(raw);
+          const nextSnapshots = { ...parsedSnapshots };
+          for (const [threadId, surfaces] of Object.entries(
+            bridgeUiSurfaceSnapshotsRef.current
+          )) {
+            nextSnapshots[threadId] = surfaces.reduce(
+              (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
+              nextSnapshots[threadId] ?? []
+            );
+          }
+
+          bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
+          for (const [threadId, surfaces] of Object.entries(nextSnapshots)) {
+            upsertThreadRuntimeSnapshot(threadId, (previous) => ({
+              bridgeUiSurfaces: (previous.bridgeUiSurfaces ?? []).reduce(
+                (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
+                surfaces
+              ),
+            }));
+          }
+          if (chatIdRef.current) {
+            applyThreadRuntimeSnapshot(chatIdRef.current);
+          }
+        } catch {
+          if (!cancelled && Object.keys(bridgeUiSurfaceSnapshotsRef.current).length === 0) {
+            bridgeUiSurfaceSnapshotsRef.current = {};
           }
         }
       };
@@ -2199,6 +2269,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
 
         if (CODEX_RUN_ABORT_EVENT_TYPES.has(codexEventType)) {
+          const failureMessage = extractCodexFailureMessage(null, msg);
           delete planItemTurnIdByThreadRef.current[threadId];
           clearPendingPlanImplementationPrompt(threadId);
           cacheThreadTurnState(threadId, {
@@ -2209,6 +2280,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             activity: {
               tone: 'error',
               title: 'Turn interrupted',
+              detail: failureMessage ?? undefined,
             },
             activeCommands: [],
             streamingText: null,
@@ -2217,6 +2289,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
 
         if (CODEX_RUN_FAILURE_EVENT_TYPES.has(codexEventType)) {
+          const failureMessage = extractCodexFailureMessage(null, msg);
           delete planItemTurnIdByThreadRef.current[threadId];
           clearPendingPlanImplementationPrompt(threadId);
           cacheThreadTurnState(threadId, {
@@ -2227,6 +2300,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             activity: {
               tone: 'error',
               title: 'Turn failed',
+              detail: failureMessage ?? undefined,
             },
             activeCommands: [],
             streamingText: null,
@@ -2358,9 +2432,14 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         : null;
     const activeModel =
       selectedModel ?? preferredDefaultModel ?? serverDefaultModel ?? null;
+    const unresolvedDefaultModelId =
+      !selectedChatId && modelOptions.length === 0
+        ? selectedModelId ?? preferredDefaultModelId
+        : null;
     const activeModelId =
       selectedModel?.id ??
       preferredDefaultModel?.id ??
+      unresolvedDefaultModelId ??
       serverDefaultModelId;
     const effortPickerModel = effortPickerModelId
       ? modelOptions.find((model) => model.id === effortPickerModelId) ?? null
@@ -2455,7 +2534,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       loadChatRequestRef.current += 1;
       setSelectedChat(null);
       setSelectedChatId(null);
-      setPendingChatEngine(fallbackDefaultChatEngine);
+      setPendingChatEngine(persistedDefaultChatEngine);
       setSelectedCollaborationMode('default');
       openingChatStartedAtRef.current = 0;
       setOpeningChatId(null);
@@ -2506,7 +2585,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       clearExternalStatusFullSync,
       clearRunWatchdog,
       defaultServiceTier,
-      fallbackDefaultChatEngine,
+      persistedDefaultChatEngine,
     ]);
 
     const startNewChat = useCallback(() => {
@@ -2532,27 +2611,88 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
     const browseWorkspacePath = useCallback(
       async (path: string | null | undefined) => {
-        setLoadingWorkspaceBrowse(true);
-        try {
-          const response = await api.listFilesystemEntries({
-            path: normalizeWorkspacePath(path),
-            directoriesOnly: true,
-          });
+        const normalizedRequestPath = normalizeWorkspacePath(path);
+        const cacheKey = getWorkspaceBrowseCacheKey(normalizedRequestPath);
+        const cached = workspaceBrowseCacheRef.current[cacheKey];
+        const requestId = workspaceBrowseRequestRef.current + 1;
+        workspaceBrowseRequestRef.current = requestId;
+        const applyResponse = (
+          response: FileSystemListResponse,
+          responseCacheKey = cacheKey
+        ) => {
           const normalizedPath = normalizeWorkspacePath(response.path);
-          setWorkspaceBridgeRoot(
-            normalizeWorkspacePath(response.bridgeRoot) ?? workspaceBridgeRoot
-          );
+          workspaceBrowseCacheRef.current[responseCacheKey] = response;
+          if (normalizedPath) {
+            workspaceBrowseCacheRef.current[getWorkspaceBrowseCacheKey(normalizedPath)] = response;
+          }
+          setWorkspaceBridgeRoot((current) => normalizeWorkspacePath(response.bridgeRoot) ?? current);
           setWorkspaceBrowsePath(normalizedPath);
           setWorkspaceBrowseParentPath(normalizeWorkspacePath(response.parentPath));
           setWorkspaceBrowseEntries(response.entries);
+        };
+
+        if (cached) {
+          setWorkspaceBridgeRoot((current) => normalizeWorkspacePath(cached.bridgeRoot) ?? current);
+          setWorkspaceBrowsePath(normalizeWorkspacePath(cached.path));
+          setWorkspaceBrowseParentPath(normalizeWorkspacePath(cached.parentPath));
+          setWorkspaceBrowseEntries(cached.entries);
+          setWorkspaceBrowseError(null);
+        }
+
+        setLoadingWorkspaceBrowse(true);
+        try {
+          const response = await api.listFilesystemEntries({
+            path: normalizedRequestPath,
+            directoriesOnly: true,
+          });
+          if (workspaceBrowseRequestRef.current !== requestId) {
+            return;
+          }
+
+          applyResponse(response);
           setWorkspaceBrowseError(null);
         } catch (err) {
-          setWorkspaceBrowseError((err as Error).message);
+          if (workspaceBrowseRequestRef.current !== requestId) {
+            return;
+          }
+          const message = (err as Error).message;
+          const missingRequestedWorkspace =
+            normalizedRequestPath !== null &&
+            /workspace directory is invalid or inaccessible|workspace directory must point to a folder/i.test(
+              message
+            );
+
+          if (missingRequestedWorkspace) {
+            try {
+              const rootResponse = await api.listFilesystemEntries({
+                path: null,
+                directoriesOnly: true,
+              });
+              if (workspaceBrowseRequestRef.current !== requestId) {
+                return;
+              }
+              applyResponse(
+                rootResponse,
+                getWorkspaceBrowseCacheKey(normalizeWorkspacePath(rootResponse.path))
+              );
+              if (normalizedRequestPath === preferredStartCwd) {
+                onDefaultStartCwdChange?.(null);
+              }
+              setWorkspaceBrowseError('Saved workspace was not found. Showing start folder.');
+              return;
+            } catch {
+              // Surface the original invalid path error; it names the path the user needs to fix.
+            }
+          }
+
+          setWorkspaceBrowseError(message);
         } finally {
-          setLoadingWorkspaceBrowse(false);
+          if (workspaceBrowseRequestRef.current === requestId) {
+            setLoadingWorkspaceBrowse(false);
+          }
         }
       },
-      [api, workspaceBridgeRoot]
+      [api, onDefaultStartCwdChange, preferredStartCwd]
     );
 
     const openWorkspacePicker = useCallback(
@@ -2568,8 +2708,10 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           null;
         setWorkspacePickerPurpose(purpose);
         setWorkspaceModalVisible(true);
-        void refreshWorkspaceRoots();
         void browseWorkspacePath(initialPath);
+        scheduleIdleTask(() => {
+          void refreshWorkspaceRoots();
+        });
       },
       [
         browseWorkspacePath,
@@ -2654,23 +2796,18 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
         try {
           const [listedChats, loadedThreadIds] = await Promise.all([
-            api.listChats({ includeSubAgents: true }),
+            api.listChats({
+              includeSubAgents: true,
+              limit: AGENT_THREADS_LIST_LIMIT,
+            }),
             api.listLoadedChatIds().catch(() => []),
           ]);
           const listedChatIds = new Set(listedChats.map((chat) => chat.id));
           const missingLoadedIds = loadedThreadIds.filter((threadId) => !listedChatIds.has(threadId));
-          const loadedOnlyChats = await Promise.all(
-            missingLoadedIds.map(async (threadId) => {
-              try {
-                return await api.getChatSummary(threadId);
-              } catch {
-                return null;
-              }
-            })
-          );
+          const loadedOnlyChats = await api.getChatSummaries(missingLoadedIds);
           const chats = [
             ...listedChats,
-            ...loadedOnlyChats.filter((chat): chat is ChatSummary => chat !== null),
+            ...loadedOnlyChats,
           ];
           const focusChat =
             chats.find((chat) => chat.id === activeChatId) ??
@@ -2726,9 +2863,6 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     );
 
     const closeWorkspaceModal = useCallback(() => {
-      if (loadingWorkspaceBrowse || loadingWorkspaceRoots) {
-        return;
-      }
       setWorkspaceModalVisible(false);
       if (
         workspacePickerPurpose === 'git-checkout-destination' &&
@@ -2738,8 +2872,6 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         setGitCheckoutModalVisible(true);
       }
     }, [
-      loadingWorkspaceBrowse,
-      loadingWorkspaceRoots,
       resumeGitCheckoutAfterWorkspacePicker,
       workspacePickerPurpose,
     ]);
@@ -2861,7 +2993,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
 
         clearForegroundAgentRefresh();
-        foregroundAgentRefreshHandleRef.current = InteractionManager.runAfterInteractions(() => {
+        foregroundAgentRefreshHandleRef.current = scheduleIdleTask(() => {
           foregroundAgentRefreshHandleRef.current = null;
           if (appStateRef.current !== 'active' || chatIdRef.current !== activeChatId) {
             return;
@@ -2948,6 +3080,11 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           parentPath,
           directoryName,
         });
+        const cloneFailureMessage = formatGitCloneFailureMessage(cloned, directoryName);
+        if (cloneFailureMessage) {
+          setGitCheckoutError(cloneFailureMessage);
+          return;
+        }
         const clonedPath = normalizeWorkspacePath(cloned.cwd) ?? joinWorkspacePath(parentPath, directoryName);
         onDefaultStartCwdChange?.(clonedPath);
         setWorkspaceBrowsePath(clonedPath);
@@ -2970,17 +3107,31 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     ]);
 
     const refreshModelOptions = useCallback(async () => {
+      const requestId = modelOptionsRequestRef.current + 1;
+      modelOptionsRequestRef.current = requestId;
+      const requestedEngine = activeChatEngine;
+      const requestedThreadId = selectedChatId;
       setLoadingModels(true);
       try {
         const models = await api.listModels(false, {
-          threadId: selectedChatId,
-          engine: activeChatEngine,
+          threadId: requestedThreadId,
+          engine: requestedEngine,
         });
-        setModelOptions(models);
+        if (modelOptionsRequestRef.current !== requestId) {
+          return;
+        }
+        setModelOptionsByEngine((previous) => ({
+          ...previous,
+          [requestedEngine]: models,
+        }));
       } catch (err) {
-        setError((err as Error).message);
+        if (modelOptionsRequestRef.current === requestId) {
+          setError((err as Error).message);
+        }
       } finally {
-        setLoadingModels(false);
+        if (modelOptionsRequestRef.current === requestId) {
+          setLoadingModels(false);
+        }
       }
     }, [activeChatEngine, api, selectedChatId]);
 
@@ -3468,7 +3619,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
       let cancelled = false;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      const idleHandle = scheduleIdleTask(() => {
         timeoutId = setTimeout(() => {
           if (cancelled) {
             return;
@@ -3499,7 +3650,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
       return () => {
         cancelled = true;
-        interactionHandle.cancel();
+        idleHandle.cancel();
         if (timeoutId !== null) {
           clearTimeout(timeoutId);
         }
@@ -3627,33 +3778,62 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     );
 
     const collaborationModeOptions = useMemo<SelectionSheetOption[]>(
-      () => [
-        {
-          key: 'default',
-          title: 'Default mode',
-          description: 'Answer directly and keep the turn moving.',
-          icon: 'chatbubble-ellipses-outline',
-          selected: selectedCollaborationMode === 'default',
-          onPress: () => {
-            setSelectedCollaborationMode('default');
-            setCollaborationModeMenuVisible(false);
-            setError(null);
+      () => {
+        const setMode = (mode: CollaborationMode) => {
+          setSelectedCollaborationMode(mode);
+          setCollaborationModeMenuVisible(false);
+          setError(null);
+        };
+
+        if (activeChatEngine === 'cursor') {
+          return [
+            {
+              key: 'default',
+              title: 'Agent mode',
+              description: 'Use Cursor as an implementation agent.',
+              icon: 'code-slash-outline' as const,
+              selected: selectedCollaborationMode === 'default',
+              onPress: () => setMode('default'),
+            },
+            {
+              key: 'ask',
+              title: 'Ask mode',
+              description: 'Answer questions and explain without changing files.',
+              icon: 'chatbubble-ellipses-outline' as const,
+              selected: selectedCollaborationMode === 'ask',
+              onPress: () => setMode('ask'),
+            },
+            {
+              key: 'plan',
+              title: 'Plan mode',
+              description: 'Inspect and propose a plan before implementation.',
+              icon: 'git-branch-outline' as const,
+              selected: selectedCollaborationMode === 'plan',
+              onPress: () => setMode('plan'),
+            },
+          ];
+        }
+
+        return [
+          {
+            key: 'default',
+            title: 'Default mode',
+            description: 'Answer directly and keep the turn moving.',
+            icon: 'chatbubble-ellipses-outline' as const,
+            selected: selectedCollaborationMode === 'default',
+            onPress: () => setMode('default'),
           },
-        },
-        {
-          key: 'plan',
-          title: 'Plan mode',
-          description: 'Pause to ask structured follow-up questions before execution.',
-          icon: 'git-branch-outline',
-          selected: selectedCollaborationMode === 'plan',
-          onPress: () => {
-            setSelectedCollaborationMode('plan');
-            setCollaborationModeMenuVisible(false);
-            setError(null);
+          {
+            key: 'plan',
+            title: 'Plan mode',
+            description: 'Pause to ask structured follow-up questions before execution.',
+            icon: 'git-branch-outline' as const,
+            selected: selectedCollaborationMode === 'plan',
+            onPress: () => setMode('plan'),
           },
-        },
-      ],
-      [selectedCollaborationMode]
+        ];
+      },
+      [activeChatEngine, selectedCollaborationMode]
     );
 
     const modelSettingsMenuOptions = useMemo<SelectionSheetOption[]>(
@@ -3740,10 +3920,14 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           description:
             engine === 'opencode'
               ? 'Use the OpenCode backend and its connected provider models.'
-              : 'Use the Codex backend and its model catalog.',
+              : engine === 'cursor'
+                ? 'Use the Cursor SDK harness and Cursor model catalog.'
+                : 'Use the Codex backend and its model catalog.',
           icon:
             engine === 'opencode'
               ? ('layers-outline' as const)
+              : engine === 'cursor'
+                ? ('code-slash-outline' as const)
               : ('sparkles-outline' as const),
           selected: activeChatEngine === engine,
           onPress: () => selectPendingChatEngine(engine),
@@ -3761,7 +3945,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             : 'Follow the bridge default model.',
           icon: 'sparkles-outline',
           badge: 'Auto',
-          selected: selectedModelId === null,
+          selected: selectedModelId === null || selectedModel === null,
           onPress: () => selectModel(null),
         },
         ...modelOptions.map((model) => ({
@@ -3777,7 +3961,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           onPress: () => selectModel(model.id),
         })),
       ],
-      [modelOptions, selectModel, selectedModelId, serverDefaultModel]
+      [modelOptions, selectModel, selectedModel, selectedModelId, serverDefaultModel]
     );
 
     const effortPickerSheetOptions = useMemo<SelectionSheetOption[]>(
@@ -3838,16 +4022,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       try {
         setRenaming(true);
         const updated = await api.renameChat(activeChatId, nextName);
-        setSelectedChat(
-          mergeChatWithPendingOptimisticMessages({
-            ...updated,
-            title: nextName,
-          })
-        );
-        setError(null);
-        setRenameModalVisible(false);
+        const renamedChat = mergeChatWithPendingOptimisticMessages({
+          ...updated,
+          title: nextName,
+        });
+        if (selectedChatIdRef.current === activeChatId) {
+          setSelectedChat((prev) =>
+            prev?.id === activeChatId ? resolveEquivalentChat(prev, renamedChat) : prev
+          );
+          setError(null);
+          setRenameModalVisible(false);
+        }
       } catch (err) {
-        setError((err as Error).message);
+        if (selectedChatIdRef.current === activeChatId) {
+          setError((err as Error).message);
+        }
       } finally {
         setRenaming(false);
       }
@@ -3989,6 +4178,77 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                     id: messageId,
                     role: 'system',
                     systemKind: 'reasoning',
+                    content,
+                    createdAt,
+                  },
+                ],
+          };
+        });
+
+        schedulePinnedScrollToBottom(true);
+      },
+      [schedulePinnedScrollToBottom]
+    );
+
+    const upsertLiveCursorToolMessage = useCallback(
+      (threadId: string, item: Record<string, unknown> | null) => {
+        if (
+          !threadId ||
+          chatIdRef.current !== threadId ||
+          selectedChatRef.current?.engine !== 'cursor'
+        ) {
+          return;
+        }
+
+        const itemId =
+          readString(item?.id) ??
+          readString(item?.callId) ??
+          readString(item?.call_id) ??
+          null;
+        if (!itemId) {
+          return;
+        }
+
+        const content = formatLiveCursorToolMessage(item);
+        if (!content) {
+          return;
+        }
+
+        const createdAt = new Date().toISOString();
+        const messageId = `cursor-tool-${itemId}`;
+        setSelectedChat((prev) => {
+          if (!prev || prev.id !== threadId) {
+            return prev;
+          }
+
+          let found = false;
+          const messages = prev.messages.map((message) => {
+            if (message.id !== messageId) {
+              return message;
+            }
+
+            found = true;
+            return {
+              ...message,
+              role: 'system' as const,
+              systemKind: 'tool' as const,
+              content,
+              createdAt: message.createdAt,
+            };
+          });
+
+          return {
+            ...prev,
+            updatedAt: createdAt,
+            statusUpdatedAt: createdAt,
+            messages: found
+              ? messages
+              : [
+                  ...messages,
+                  {
+                    id: messageId,
+                    role: 'system',
+                    systemKind: 'tool',
                     content,
                     createdAt,
                   },
@@ -4186,14 +4446,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         const name = commandDef?.name ?? rawName;
         const argText = args.trim();
 
-        if (!commandDef) {
-          setError(`Unknown slash command: /${rawName}`);
-          return true;
-        }
-
-        if (!commandDef.mobileSupported) {
-          setError(commandDef.availabilityNote ?? `/${name} is available in Codex CLI only.`);
-          return true;
+        if (!commandDef || !commandDef.mobileSupported) {
+          return false;
         }
 
         if (name === 'agent') {
@@ -4230,7 +4484,10 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                   engine: activeChatEngine,
                 });
           if (modelOptions.length === 0) {
-            setModelOptions(models);
+            setModelOptionsByEngine((previous) => ({
+              ...previous,
+              [activeChatEngine]: models,
+            }));
           }
           const lowered = argText.toLowerCase();
           const match = models.find(
@@ -4298,6 +4555,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           setSelectedCollaborationMode('plan');
           if (!selectedChatId) {
             let createdChatId: string | null = null;
+            let adoptedCreatedChat = false;
+            const isCreatedChatVisible = () =>
+              createdChatId
+                ? selectedChatIdRef.current === createdChatId ||
+                  (adoptedCreatedChat && selectedChatIdRef.current === null)
+                : selectedChatIdRef.current === null;
             const optimisticMessage: ChatTranscriptMessage = {
               id: `msg-${Date.now()}`,
               role: 'user',
@@ -4329,24 +4592,27 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               });
               createdChatId = created.id;
 
-              setSelectedChatId(created.id);
               queueOptimisticUserMessage(created.id, optimisticMessage, {
                 baseChat: created,
               });
-              setSelectedChat({
-                ...created,
-                status: 'running',
-                updatedAt: new Date().toISOString(),
-                statusUpdatedAt: new Date().toISOString(),
-                lastMessagePreview: argText.slice(0, 50),
-                messages: [...created.messages, optimisticMessage],
-              });
+              if (selectedChatIdRef.current === null) {
+                adoptedCreatedChat = true;
+                setSelectedChatId(created.id);
+                setSelectedChat({
+                  ...created,
+                  status: 'running',
+                  updatedAt: new Date().toISOString(),
+                  statusUpdatedAt: new Date().toISOString(),
+                  lastMessagePreview: argText.slice(0, 50),
+                  messages: [...created.messages, optimisticMessage],
+                });
 
-              setActivity({
-                tone: 'running',
-                title: 'Sending plan prompt',
-              });
-              bumpRunWatchdog();
+                setActivity({
+                  tone: 'running',
+                  title: 'Sending plan prompt',
+                });
+                bumpRunWatchdog();
+              }
 
               const updated = await api.sendChatMessage(created.id, {
                 content: argText,
@@ -4363,7 +4629,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 mergeChatWithPendingOptimisticMessages(updated);
               const autoEnabledPlan =
                 shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-              if (autoEnabledPlan) {
+              const isStillVisible = isCreatedChatVisible();
+              if (autoEnabledPlan && isStillVisible) {
                 setSelectedCollaborationMode('plan');
               }
               rememberChatModelPreference(
@@ -4372,24 +4639,30 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 selectedEffort ?? activeEffort,
                 activeServiceTier
               );
-              setSelectedChat(resolvedUpdated);
-              setError(null);
-              setActivity({
-                tone: 'complete',
-                title: 'Turn completed',
-                detail:
-                  autoEnabledPlan
-                    ? 'Plan mode enabled for the next turn'
-                    : undefined,
-              });
-              clearRunWatchdog();
+              if (isStillVisible) {
+                setSelectedChat(resolvedUpdated);
+                setError(null);
+                setActivity({
+                  tone: 'complete',
+                  title: 'Turn completed',
+                  detail:
+                    autoEnabledPlan
+                      ? 'Plan mode enabled for the next turn'
+                      : undefined,
+                });
+                clearRunWatchdog();
+              }
             } catch (err) {
               if (createdChatId) {
                 discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
               }
-              handleTurnFailure(err);
+              if (isCreatedChatVisible()) {
+                handleTurnFailure(err);
+              }
             } finally {
-              setCreating(false);
+              if (isCreatedChatVisible()) {
+                setCreating(false);
+              }
             }
             return true;
           }
@@ -4400,6 +4673,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             content: argText,
             createdAt: new Date().toISOString(),
           };
+          const targetChatId = selectedChatId;
 
           try {
             setSending(true);
@@ -4407,7 +4681,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             setStoppingTurn(false);
             stopRequestedRef.current = false;
             setActivePlan(null);
-            cacheThreadPlan(selectedChatId, null);
+            cacheThreadPlan(targetChatId, null);
             setPendingUserInputRequest(null);
             setUserInputDrafts({});
             setUserInputError(null);
@@ -4418,12 +4692,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             });
             bumpRunWatchdog();
             setDraft('');
-            queueOptimisticUserMessage(selectedChatId, optimisticMessage);
+            queueOptimisticUserMessage(targetChatId, optimisticMessage);
             setSelectedChat((prev) => {
               const baseChat =
-                selectedChat?.id === selectedChatId
+                selectedChat?.id === targetChatId
                   ? selectedChat
-                  : prev?.id === selectedChatId
+                  : prev?.id === targetChatId
                     ? prev
                     : prev;
               if (!baseChat) {
@@ -4443,7 +4717,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               };
             });
             scrollToBottomReliable(true);
-            const updated = await api.sendChatMessage(selectedChatId, {
+            const updated = await api.sendChatMessage(targetChatId, {
               content: argText,
               cwd: selectedChat?.cwd,
               model: activeModelId ?? undefined,
@@ -4452,28 +4726,34 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               approvalPolicy: activeApprovalPolicy,
               collaborationMode: 'plan',
             }, {
-              onTurnStarted: (turnId) => registerTurnStarted(selectedChatId, turnId),
+              onTurnStarted: (turnId) => registerTurnStarted(targetChatId, turnId),
             });
             const resolvedUpdated =
               mergeChatWithPendingOptimisticMessages(updated);
             rememberChatModelPreference(
-              selectedChatId,
+              targetChatId,
               activeModelId,
               selectedEffort ?? activeEffort,
               activeServiceTier
             );
-            setSelectedChat(resolvedUpdated);
-            setError(null);
-            setActivity({
-              tone: 'complete',
-              title: 'Turn completed',
-            });
-            clearRunWatchdog();
+            if (selectedChatIdRef.current === targetChatId) {
+              setSelectedChat(resolvedUpdated);
+              setError(null);
+              setActivity({
+                tone: 'complete',
+                title: 'Turn completed',
+              });
+              clearRunWatchdog();
+            }
           } catch (err) {
-            discardOptimisticUserMessage(selectedChatId, optimisticMessage.id);
-            handleTurnFailure(err);
+            discardOptimisticUserMessage(targetChatId, optimisticMessage.id);
+            if (selectedChatIdRef.current === targetChatId) {
+              handleTurnFailure(err);
+            }
           } finally {
-            setSending(false);
+            if (selectedChatIdRef.current === targetChatId) {
+              setSending(false);
+            }
           }
 
           return true;
@@ -4485,7 +4765,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             `Reasoning: ${activeEffortLabel}`,
             `Fast mode: ${fastModeEnabled ? 'On' : 'Off'}`,
             `Mode: ${formatCollaborationModeLabel(selectedCollaborationMode)}`,
-            `Default workspace: ${preferredStartCwd ?? 'Bridge default workspace'}`,
+            `Default workspace: ${preferredStartCwd ?? 'Select project'}`,
           ];
           if (selectedChat) {
             lines.push(`Chat: ${selectedChat.title || selectedChat.id}`);
@@ -4511,15 +4791,22 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           try {
             setRenaming(true);
             const updated = await api.renameChat(activeChatId, argText);
-            setSelectedChat(mergeChatWithPendingOptimisticMessages(updated));
-            setActivity({
-              tone: 'complete',
-              title: 'Chat renamed',
-              detail: updated.title,
-            });
-            setError(null);
+            const renamedChat = mergeChatWithPendingOptimisticMessages(updated);
+            if (selectedChatIdRef.current === activeChatId) {
+              setSelectedChat((prev) =>
+                prev?.id === activeChatId ? resolveEquivalentChat(prev, renamedChat) : prev
+              );
+              setActivity({
+                tone: 'complete',
+                title: 'Chat renamed',
+                detail: updated.title,
+              });
+              setError(null);
+            }
           } catch (err) {
-            setError((err as Error).message);
+            if (selectedChatIdRef.current === activeChatId) {
+              setError((err as Error).message);
+            }
           } finally {
             setRenaming(false);
           }
@@ -4592,6 +4879,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             setError('/fork requires an open chat');
             return true;
           }
+          const sourceChatId = selectedChatId;
 
           try {
             setCreating(true);
@@ -4605,6 +4893,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               serviceTier: activeServiceTier ?? undefined,
               approvalPolicy: activeApprovalPolicy,
             });
+            if (selectedChatIdRef.current !== sourceChatId) {
+              return true;
+            }
             setSelectedChatId(forked.id);
             rememberChatModelPreference(
               forked.id,
@@ -4619,14 +4910,18 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               title: 'Chat forked',
             });
           } catch (err) {
-            setError((err as Error).message);
-            setActivity({
-              tone: 'error',
-              title: 'Fork failed',
-              detail: (err as Error).message,
-            });
+            if (selectedChatIdRef.current === sourceChatId) {
+              setError((err as Error).message);
+              setActivity({
+                tone: 'error',
+                title: 'Fork failed',
+                detail: (err as Error).message,
+              });
+            }
           } finally {
-            setCreating(false);
+            if (selectedChatIdRef.current === sourceChatId) {
+              setCreating(false);
+            }
           }
           return true;
         }
@@ -4641,10 +4936,10 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           return true;
         }
 
-        setError(`Unsupported slash command on mobile: /${name}`);
-        return true;
+        return false;
       },
       [
+        activeChatEngine,
         activeEffort,
         activeModelId,
         activeEffortLabel,
@@ -4684,16 +4979,20 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         loadChatRequestRef.current = requestId;
         let loadedSuccessfully = false;
         try {
-          const [loadedChat, queueState] = await Promise.all([
-            api.getChat(chatId),
-            api.readThreadQueue(chatId),
-          ]);
+          void api
+            .readThreadQueue(chatId)
+            .then((queueState) => {
+              if (requestId === loadChatRequestRef.current) {
+                cacheThreadQueueState(chatId, queueState);
+              }
+            })
+            .catch(() => {});
+          const loadedChat = await api.getChat(chatId, { forceRefresh: true });
           const chat = mergeChatWithPendingOptimisticMessages(loadedChat);
           if (requestId !== loadChatRequestRef.current) {
             return;
           }
           loadedSuccessfully = true;
-          cacheThreadQueueState(chatId, queueState);
           const shouldPreserveRuntimeState = Boolean(
             options?.preserveRuntimeState && chatId === chatIdRef.current
           );
@@ -4816,19 +5115,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const openChatThread = useCallback(
       (id: string, optimisticChat?: Chat | null) => {
         const isSameChat = chatIdRef.current === id;
-        const hasSnapshot = Boolean(
-          optimisticChat &&
-            optimisticChat.id === id &&
-            optimisticChat.messages.length > 0
-        );
+        const providedSnapshot =
+          optimisticChat && optimisticChat.id === id ? optimisticChat : null;
+        const providedHydratedSnapshot =
+          providedSnapshot && providedSnapshot.messages.length > 0 ? providedSnapshot : null;
+        const cachedChat = providedHydratedSnapshot ?? api.peekChat(id);
+        const optimisticSnapshot = cachedChat ?? providedSnapshot ?? api.peekChatShell(id);
+        const hasHydratedSnapshot = Boolean(cachedChat);
 
         if (isSameChat) {
           setSelectedChatId(id);
           openingChatStartedAtRef.current = 0;
           setOpeningChatId(null);
           setError(null);
-          if (hasSnapshot && optimisticChat) {
-            setSelectedChat(mergeChatWithPendingOptimisticMessages(optimisticChat));
+          if (optimisticSnapshot) {
+            setSelectedChat(mergeChatWithPendingOptimisticMessages(optimisticSnapshot));
           }
           void refreshPendingApprovalsForThread(id);
           loadChat(id, {
@@ -4839,8 +5140,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         }
 
         setSelectedChatId(id);
-        openingChatStartedAtRef.current = hasSnapshot ? 0 : Date.now();
-        setOpeningChatId(hasSnapshot ? null : id);
+        openingChatStartedAtRef.current = hasHydratedSnapshot ? 0 : Date.now();
+        setOpeningChatId(hasHydratedSnapshot ? null : id);
         setSending(false);
         setCreating(false);
         setError(null);
@@ -4862,8 +5163,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         stopSystemMessageLoggedRef.current = false;
         delete autoEnabledPlanTurnIdByThreadRef.current[id];
 
-        if (hasSnapshot && optimisticChat) {
-          setSelectedChat(mergeChatWithPendingOptimisticMessages(optimisticChat));
+        if (optimisticSnapshot) {
+          setSelectedChat(mergeChatWithPendingOptimisticMessages(optimisticSnapshot));
         } else {
           setSelectedChat(null);
         }
@@ -4877,6 +5178,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         loadChat(id, { forceScroll: true }).catch(() => {});
       },
       [
+        api,
         applyThreadRuntimeSnapshot,
         loadChat,
         mergeChatWithPendingOptimisticMessages,
@@ -5101,6 +5403,12 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       setDraft('');
 
       let createdChatId: string | null = null;
+      let adoptedCreatedChat = false;
+      const isCreatedChatVisible = () =>
+        createdChatId
+          ? selectedChatIdRef.current === createdChatId ||
+            (adoptedCreatedChat && selectedChatIdRef.current === null)
+          : selectedChatIdRef.current === null;
       try {
         setCreating(true);
         setActiveTurnId(null);
@@ -5125,25 +5433,28 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         });
         createdChatId = created.id;
 
-        setSelectedChatId(created.id);
         queueOptimisticUserMessage(created.id, optimisticMessage, {
           baseChat: created,
         });
-        setSelectedChat({
-          ...created,
-          status: 'running',
-          updatedAt: new Date().toISOString(),
-          statusUpdatedAt: new Date().toISOString(),
-          lastMessagePreview: content.slice(0, 50),
-          messages: [...created.messages, optimisticMessage],
-        });
-        scrollToBottomReliable(true);
+        if (selectedChatIdRef.current === null) {
+          adoptedCreatedChat = true;
+          setSelectedChatId(created.id);
+          setSelectedChat({
+            ...created,
+            status: 'running',
+            updatedAt: new Date().toISOString(),
+            statusUpdatedAt: new Date().toISOString(),
+            lastMessagePreview: content.slice(0, 50),
+            messages: [...created.messages, optimisticMessage],
+          });
+          scrollToBottomReliable(true);
 
-        setActivity({
-          tone: 'running',
-          title: 'Working',
-        });
-        bumpRunWatchdog();
+          setActivity({
+            tone: 'running',
+            title: 'Working',
+          });
+          bumpRunWatchdog();
+        }
 
         const updated = await api.sendChatMessage(
           created.id,
@@ -5166,7 +5477,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           mergeChatWithPendingOptimisticMessages(updated);
         const autoEnabledPlan =
           shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-        if (autoEnabledPlan) {
+        const isStillVisible = isCreatedChatVisible();
+        if (autoEnabledPlan && isStillVisible) {
           setSelectedCollaborationMode('plan');
         }
         rememberChatModelPreference(
@@ -5175,42 +5487,48 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           selectedEffort ?? activeEffort,
           activeServiceTier
         );
-        setSelectedChat(resolvedUpdated);
-        setPendingMentionPaths([]);
-        setPendingLocalImagePaths([]);
-        setError(null);
-        if (resolvedUpdated.status === 'complete') {
-          setActivity({
-            tone: 'complete',
-            title: 'Turn completed',
-            detail:
-              autoEnabledPlan && selectedCollaborationMode !== 'plan'
-                ? 'Plan mode enabled for the next turn'
-                : undefined,
-          });
-          clearRunWatchdog();
-        } else if (resolvedUpdated.status === 'error') {
-          setActivity({
-            tone: 'error',
-            title: 'Turn failed',
-            detail: resolvedUpdated.lastError ?? undefined,
-          });
-          clearRunWatchdog();
-        } else {
-          // 'running' or 'idle' (server may not have started yet) — keep working
-          setActivity({
-            tone: 'running',
-            title: 'Working',
-          });
-          bumpRunWatchdog();
+        if (isStillVisible) {
+          setSelectedChat(resolvedUpdated);
+          setPendingMentionPaths([]);
+          setPendingLocalImagePaths([]);
+          setError(null);
+          if (resolvedUpdated.status === 'complete') {
+            setActivity({
+              tone: 'complete',
+              title: 'Turn completed',
+              detail:
+                autoEnabledPlan && selectedCollaborationMode !== 'plan'
+                  ? 'Plan mode enabled for the next turn'
+                  : undefined,
+            });
+            clearRunWatchdog();
+          } else if (resolvedUpdated.status === 'error') {
+            setActivity({
+              tone: 'error',
+              title: 'Turn failed',
+              detail: resolvedUpdated.lastError ?? undefined,
+            });
+            clearRunWatchdog();
+          } else {
+            // 'running' or 'idle' (server may not have started yet) — keep working
+            setActivity({
+              tone: 'running',
+              title: 'Working',
+            });
+            bumpRunWatchdog();
+          }
         }
       } catch (err) {
         if (createdChatId) {
           discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
         }
-        handleTurnFailure(err);
+        if (isCreatedChatVisible()) {
+          handleTurnFailure(err);
+        }
       } finally {
-        setCreating(false);
+        if (isCreatedChatVisible()) {
+          setCreating(false);
+        }
       }
     }, [
       api,
@@ -5252,6 +5570,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         if (!selectedChatId || !content) {
           return false;
         }
+        const targetChatId = selectedChatId;
 
         const shouldClearComposer = options?.clearComposer ?? true;
         const shouldPreservePlan = options?.preservePlan ?? false;
@@ -5268,7 +5587,43 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           pendingMentionPaths.map((path) => toMentionInput(path, selectedChat?.cwd));
         const turnLocalImages =
           options?.localImages ?? pendingLocalImagePaths.map((path) => ({ path }));
-        const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[selectedChatId] ?? null;
+        const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[targetChatId] ?? null;
+        const goalObjective =
+          activeChatEngine === 'codex' ? parseGoalSlashObjective(content) : null;
+        const optimisticGoalSurface = goalObjective
+          ? buildOptimisticGoalBridgeUiSurface(
+              targetChatId,
+              goalObjective,
+              new Date().toISOString()
+            )
+          : null;
+        const previousBridgeUiSurfaces = optimisticGoalSurface
+          ? [
+              ...(selectedThreadSnapshot?.bridgeUiSurfaces ??
+                activeBridgeUiSurfaces.filter((surface) => surface.threadId === targetChatId)),
+            ]
+          : null;
+        const replaceGoalSurfaces = (surface: BridgeUiSurface) => {
+          const nextSurfaces = [
+            ...(previousBridgeUiSurfaces ?? []).filter(
+              (entry) => entry.kind !== 'goal' && !entry.id.startsWith('goal-')
+            ),
+            surface,
+          ];
+          replaceThreadBridgeUiSurfaces(targetChatId, nextSurfaces);
+          if (selectedChatIdRef.current === targetChatId) {
+            setActiveBridgeUiSurfaces(nextSurfaces);
+          }
+        };
+        const restoreGoalSurfaces = () => {
+          if (!previousBridgeUiSurfaces) {
+            return;
+          }
+          replaceThreadBridgeUiSurfaces(targetChatId, previousBridgeUiSurfaces);
+          if (selectedChatIdRef.current === targetChatId) {
+            setActiveBridgeUiSurfaces(previousBridgeUiSurfaces);
+          }
+        };
         const knownQueuedMessages = selectedThreadSnapshot?.queuedMessages ?? [];
         const likelyQueuesLocally =
           knownQueuedMessages.length > 0 ||
@@ -5293,21 +5648,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             } satisfies ChatTranscriptMessage)
           : null;
         const previousSelectedChatPreview =
-          selectedChatRef.current?.id === selectedChatId
+          selectedChatRef.current?.id === targetChatId
             ? selectedChatRef.current.lastMessagePreview
-            : selectedChat?.id === selectedChatId
+            : selectedChat?.id === targetChatId
               ? selectedChat.lastMessagePreview
               : null;
         const optimisticQueuedMessage = shouldShowOptimisticQueuedMessage
-          ? queueOptimisticQueuedMessage(selectedChatId, content)
+          ? queueOptimisticQueuedMessage(targetChatId, content)
           : null;
         const clearOptimisticSentMessage = () => {
           if (!optimisticSentMessage) {
             return;
           }
-          discardOptimisticUserMessage(selectedChatId, optimisticSentMessage.id);
+          discardOptimisticUserMessage(targetChatId, optimisticSentMessage.id);
           setSelectedChat((prev) => {
-            if (!prev || prev.id !== selectedChatId) {
+            if (!prev || prev.id !== targetChatId) {
               return prev;
             }
 
@@ -5342,13 +5697,16 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           if (shouldClearComposer) {
             setDraft('');
           }
+          if (optimisticGoalSurface) {
+            replaceGoalSurfaces(optimisticGoalSurface);
+          }
           if (optimisticSentMessage) {
-            queueOptimisticUserMessage(selectedChatId, optimisticSentMessage);
+            queueOptimisticUserMessage(targetChatId, optimisticSentMessage);
             setSelectedChat((prev) => {
               const baseChat =
-                selectedChat?.id === selectedChatId
+                selectedChat?.id === targetChatId
                   ? selectedChat
-                  : prev?.id === selectedChatId
+                  : prev?.id === targetChatId
                     ? prev
                     : prev;
               if (!baseChat) {
@@ -5371,7 +5729,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           }
 
           const result = await api.sendOrQueueChatMessage(
-            selectedChatId,
+            targetChatId,
             {
               content,
               mentions: turnMentions,
@@ -5388,25 +5746,31 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             }
           );
 
-          discardOptimisticQueuedMessage(selectedChatId, optimisticQueuedMessage?.id);
-          cacheThreadQueueState(selectedChatId, result.queue);
+          discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
+          cacheThreadQueueState(targetChatId, result.queue);
           rememberChatModelPreference(
-            selectedChatId,
+            targetChatId,
             activeModelId,
             selectedEffort ?? activeEffort,
             activeServiceTier
           );
 
-          if (shouldClearComposer) {
+          const isStillSelectedForResult = selectedChatIdRef.current === targetChatId;
+          if (shouldClearComposer && isStillSelectedForResult) {
             setPendingMentionPaths([]);
             setPendingLocalImagePaths([]);
           }
 
-          setError(null);
+          if (isStillSelectedForResult) {
+            setError(null);
+          }
 
           if (result.disposition === 'queued') {
             clearOptimisticSentMessage();
-            if (!selectedChatRef.current || !isChatLikelyRunning(selectedChatRef.current)) {
+            if (
+              selectedChatIdRef.current === targetChatId &&
+              (!selectedChatRef.current || !isChatLikelyRunning(selectedChatRef.current))
+            ) {
               setActivity({
                 tone: 'idle',
                 title: 'Message queued',
@@ -5416,67 +5780,84 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             return true;
           }
 
-          registerTurnStarted(selectedChatId, result.turnId);
-          setStoppingTurn(false);
-          stopRequestedRef.current = false;
-          if (!shouldPreservePlan) {
-            setActivePlan(null);
-            cacheThreadPlan(selectedChatId, null);
+          registerTurnStarted(targetChatId, result.turnId);
+          const isStillSelected = selectedChatIdRef.current === targetChatId;
+          if (isStillSelected) {
+            setStoppingTurn(false);
+            stopRequestedRef.current = false;
           }
-          setPendingUserInputRequest(null);
-          setUserInputDrafts({});
-          setUserInputError(null);
-          setResolvingUserInput(false);
+          if (!shouldPreservePlan) {
+            if (isStillSelected) {
+              setActivePlan(null);
+            }
+            cacheThreadPlan(targetChatId, null);
+          }
+          if (isStillSelected) {
+            setPendingUserInputRequest(null);
+            setUserInputDrafts({});
+            setUserInputError(null);
+            setResolvingUserInput(false);
+          }
           const resolvedUpdated = mergeChatWithPendingOptimisticMessages(result.chat);
           const autoEnabledPlan =
             !options?.suppressPlanModeAutoEnable &&
             shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-          if (autoEnabledPlan) {
+          if (autoEnabledPlan && isStillSelected) {
             setSelectedCollaborationMode('plan');
           }
-          setSelectedChat(resolvedUpdated);
-          if (resolvedUpdated.status === 'complete') {
-            setActivity({
-              tone: 'complete',
-              title: 'Turn completed',
-              detail:
-                autoEnabledPlan && resolvedCollaborationMode !== 'plan'
-                  ? 'Plan mode enabled for the next turn'
-                  : undefined,
-            });
-            clearRunWatchdog();
-          } else if (resolvedUpdated.status === 'error') {
-            setActivity({
-              tone: 'error',
-              title: 'Turn failed',
-              detail: resolvedUpdated.lastError ?? undefined,
-            });
-            clearRunWatchdog();
-          } else {
-            // 'running' or 'idle' (server may not have started yet) — keep working
-            setActivity({
-              tone: 'running',
-              title: 'Working',
-            });
-            bumpRunWatchdog();
+          if (isStillSelected) {
+            setSelectedChat(resolvedUpdated);
+            if (resolvedUpdated.status === 'complete') {
+              setActivity({
+                tone: 'complete',
+                title: 'Turn completed',
+                detail:
+                  autoEnabledPlan && resolvedCollaborationMode !== 'plan'
+                    ? 'Plan mode enabled for the next turn'
+                    : undefined,
+              });
+              clearRunWatchdog();
+            } else if (resolvedUpdated.status === 'error') {
+              restoreGoalSurfaces();
+              setActivity({
+                tone: 'error',
+                title: 'Turn failed',
+                detail: resolvedUpdated.lastError ?? undefined,
+              });
+              clearRunWatchdog();
+            } else {
+              // 'running' or 'idle' (server may not have started yet) — keep working
+              setActivity({
+                tone: 'running',
+                title: 'Working',
+              });
+              bumpRunWatchdog();
+            }
           }
         } catch (err) {
+          restoreGoalSurfaces();
           clearOptimisticSentMessage();
-          discardOptimisticQueuedMessage(selectedChatId, optimisticQueuedMessage?.id);
-          handleTurnFailure(err);
+          discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
+          if (selectedChatIdRef.current === targetChatId) {
+            handleTurnFailure(err);
+          }
           return false;
         } finally {
-          setSending(false);
+          if (selectedChatIdRef.current === targetChatId) {
+            setSending(false);
+          }
         }
 
         return true;
       },
       [
+        activeChatEngine,
         activeEffort,
         activeModelId,
         activeApprovalPolicy,
         activeServiceTier,
         api,
+        activeBridgeUiSurfaces,
         cacheThreadPlan,
         cacheThreadQueueState,
         handleSlashCommand,
@@ -5496,6 +5877,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         queueOptimisticUserMessage,
         queueOptimisticQueuedMessage,
         registerTurnStarted,
+        replaceThreadBridgeUiSurfaces,
         rememberChatModelPreference,
         scrollToBottomReliable,
       ]
@@ -5643,6 +6025,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           const snapshot = readAccountRateLimitSnapshot(
             params?.rateLimits ?? params?.rate_limits ?? event.params
           );
+          api.rememberAccountRateLimits(snapshot);
           accountRateLimitsRef.current = snapshot;
           setAccountRateLimits(snapshot);
           return;
@@ -5690,6 +6073,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             if (rateLimitSnapshot && !accountRateLimitsRef.current) {
               // Token-count events can lag behind account-level rate-limit reads.
               // Only use them as a bootstrap source when we have no account snapshot yet.
+              api.rememberAccountRateLimits(rateLimitSnapshot);
               accountRateLimitsRef.current = rateLimitSnapshot;
               setAccountRateLimits(rateLimitSnapshot);
             }
@@ -5934,6 +6318,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           }
 
           if (CODEX_RUN_ABORT_EVENT_TYPES.has(codexEventType)) {
+            const failureMessage = extractCodexFailureMessage(params, msg);
             const interruptedByUser = stopRequestedRef.current;
             delete planItemTurnIdByThreadRef.current[activeThreadId];
             clearPendingPlanImplementationPrompt(activeThreadId);
@@ -5949,16 +6334,20 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             if (interruptedByUser) {
               setError(null);
               appendStopSystemMessageIfNeeded();
+            } else if (failureMessage) {
+              setError(failureMessage);
             }
             setActivity({
               tone: interruptedByUser ? 'complete' : 'error',
               title: interruptedByUser ? 'Turn stopped' : 'Turn interrupted',
+              detail: interruptedByUser ? undefined : failureMessage ?? undefined,
             });
             loadChat(activeThreadId).catch(() => {});
             return;
           }
 
           if (CODEX_RUN_FAILURE_EVENT_TYPES.has(codexEventType)) {
+            const failureMessage = extractCodexFailureMessage(params, msg);
             delete planItemTurnIdByThreadRef.current[activeThreadId];
             clearPendingPlanImplementationPrompt(activeThreadId);
             clearRunWatchdog();
@@ -5970,9 +6359,13 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             reasoningSummaryRef.current = {};
             codexReasoningBufferRef.current = '';
             hadCommandRef.current = false;
+            if (failureMessage) {
+              setError(failureMessage);
+            }
             setActivity({
               tone: 'error',
               title: 'Turn failed',
+              detail: failureMessage ?? undefined,
             });
             loadChat(activeThreadId).catch(() => {});
             return;
@@ -6234,6 +6627,15 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           }
 
           if (itemType === 'mcpToolCall') {
+            setActivity({
+              tone: 'running',
+              title: 'Working',
+            });
+            return;
+          }
+
+          if (itemType === 'toolCall') {
+            upsertLiveCursorToolMessage(threadId, item);
             setActivity({
               tone: 'running',
               title: 'Working',
@@ -6621,6 +7023,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
               title: failed ? 'Turn failed' : 'Working',
             });
           }
+          if (itemType === 'toolCall') {
+            upsertLiveCursorToolMessage(threadId, item);
+          }
           return;
         }
 
@@ -6856,6 +7261,36 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           return;
         }
 
+        if (event.method === 'bridge/ui.present' || event.method === 'bridge/ui.update') {
+          const surface = toBridgeUiSurface(event.params);
+          if (!surface) {
+            return;
+          }
+
+          cacheThreadBridgeUiSurface(surface.threadId, surface);
+          if (surface.threadId === currentId) {
+            setActiveBridgeUiSurfaces((previous) =>
+              upsertBridgeUiSurfaceList(previous, surface)
+            );
+          }
+          return;
+        }
+
+        if (event.method === 'bridge/ui.dismiss') {
+          const params = toRecord(event.params);
+          const surfaceId = readString(params?.id);
+          const threadId = readString(params?.threadId);
+          if (!surfaceId) {
+            return;
+          }
+
+          removeThreadBridgeUiSurface(surfaceId, threadId);
+          setActiveBridgeUiSurfaces((previous) =>
+            removeBridgeUiSurfaceFromList(previous, surfaceId)
+          );
+          return;
+        }
+
         if (event.method === 'bridge/approval.resolved') {
           const params = toRecord(event.params);
           const resolvedId = readString(params?.id);
@@ -7042,6 +7477,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       cacheThreadActiveCommand,
       cacheThreadActivity,
       cacheThreadContextUsage,
+      cacheThreadBridgeUiSurface,
       cacheThreadPendingApproval,
       cacheThreadPendingUserInputRequest,
       cacheThreadPlan,
@@ -7052,11 +7488,13 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       clearRunWatchdog,
       readThreadContextUsage,
       refreshPendingApprovalsForThread,
+      removeThreadBridgeUiSurface,
       scheduleDisconnectActivity,
       scheduleExternalStatusFullSync,
       registerTurnStarted,
       pushActiveCommand,
       scrollToBottomIfPinned,
+      upsertLiveCursorToolMessage,
       upsertLiveReasoningMessage,
       upsertThreadRuntimeSnapshot,
     ]);
@@ -7148,6 +7586,15 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                       tone: 'idle',
                       title: 'Ready',
                     };
+              }
+
+              if (resolvedLatest.status === 'error') {
+                const failureDetail = resolvedLatest.lastError?.trim() || prev.detail;
+                return {
+                  tone: 'error',
+                  title: prev.tone === 'error' && prev.title ? prev.title : 'Turn failed',
+                  detail: failureDetail || undefined,
+                };
               }
 
               return {
@@ -7268,6 +7715,42 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       userInputDrafts,
     ]);
 
+    const dismissBridgeUiSurface = useCallback(
+      async (surface: BridgeUiSurface) => {
+        removeThreadBridgeUiSurface(surface.id, surface.threadId);
+        setActiveBridgeUiSurfaces((previous) =>
+          removeBridgeUiSurfaceFromList(previous, surface.id)
+        );
+        try {
+          await api.dismissBridgeUiSurface(surface.id, surface.threadId);
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      },
+      [api, removeThreadBridgeUiSurface]
+    );
+
+    const handleBridgeUiAction = useCallback(
+      async (surface: BridgeUiSurface, action: BridgeUiAction) => {
+        try {
+          await api.resolveBridgeUiSurface(surface.id, {
+            threadId: surface.threadId,
+            turnId: surface.turnId ?? null,
+            actionId: action.id,
+          });
+          if (action.dismissesSurface !== false) {
+            removeThreadBridgeUiSurface(surface.id, surface.threadId);
+            setActiveBridgeUiSurfaces((previous) =>
+              removeBridgeUiSurfaceFromList(previous, surface.id)
+            );
+          }
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      },
+      [api, removeThreadBridgeUiSurface]
+    );
+
     const handleOpenGit = useCallback(() => {
       if (!selectedChat) {
         return;
@@ -7373,6 +7856,10 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     ]);
 
     const showBridgeRecoveryBanner = bridgeRecoveryBannerVisible && !ws.isConnected;
+    const turnFailureDetail =
+      error?.trim() ||
+      (selectedChat?.status === 'error' ? selectedChat.lastError?.trim() ?? null : null) ||
+      (activity.tone === 'error' ? activity.detail?.trim() ?? null : null);
     const visibleActivity = (() => {
       if (isOpeningChat) {
         return {
@@ -7426,8 +7913,9 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
       if (activity.tone === 'error' && activity.title === 'Turn failed') {
         return {
-          tone: 'idle',
-          title: 'Ready',
+          tone: 'error',
+          title: 'Turn failed',
+          detail: turnFailureDetail ?? undefined,
         } satisfies ActivityState;
       }
 
@@ -7506,7 +7994,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       (displayedActivity.tone !== 'idle' &&
         (!isGenericRunningActivity || showDelayedGenericRunningActivity)) ||
       Boolean(activityDetail);
-    const activeContextWindow = threadContextUsage?.modelContextWindow ?? null;
+    const activeContextWindow =
+      threadContextUsage?.modelContextWindow ?? activeModel?.contextWindow ?? null;
     const contextUsedTokens = threadContextUsage?.lastTokens ?? null;
     const contextWindowLabel =
       activeContextWindow !== null ? formatTokenCount(activeContextWindow) : null;
@@ -7532,14 +8021,40 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       activeChatEngine === 'codex'
         ? buildComposerUsageLimitBadges(accountRateLimits)
         : [];
+    const accountUsageLimitAlert =
+      activeChatEngine === 'codex'
+        ? buildComposerUsageLimitAlert(accountRateLimits)
+        : null;
+    const rateLimitErrorAlert =
+      activeChatEngine === 'codex' && !accountUsageLimitAlert
+        ? buildRateLimitAlertFromMessages([
+            error,
+            activity.detail,
+            displayedActivity.detail,
+            activity.title,
+            displayedActivity.title,
+          ])
+        : null;
+    const usageLimitAlert = accountUsageLimitAlert ?? rateLimitErrorAlert;
+    const usageLimitBannerTurnInProgress =
+      isLoading ||
+      isOpeningChat ||
+      stoppingTurn ||
+      Boolean(pendingApproval) ||
+      Boolean(pendingUserInputRequest) ||
+      isTurnLikelyRunning ||
+      hasRunWatchdog ||
+      displayedActivity.tone === 'running';
+    const showUsageLimitBanner =
+      Boolean(usageLimitAlert) && ws.isConnected && !usageLimitBannerTurnInProgress;
     const contextChipLabel =
       contextUsedLabel && contextWindowLabel
         ? `${contextUsedLabel} / ${contextWindowLabel}${
             contextRemainingPercent !== null ? ` · ${String(contextRemainingPercent)}% left` : ''
           }`
         : contextWindowLabel
-          ? `${contextWindowLabel} window`
-          : 'Context --';
+          ? `Context ${contextWindowLabel}`
+          : 'Context';
     const contextIndicatorColor =
       contextRemainingPercent === null
         ? contextWindowLabel
@@ -7552,7 +8067,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             : theme.colors.borderHighlight;
     const headerTitle = isOpeningChat ? 'Opening chat' : selectedChat?.title?.trim() || 'New chat';
     const defaultStartWorkspaceLabel =
-      preferredStartCwd ?? 'Bridge default workspace';
+      preferredStartCwd ?? 'Select project';
     const gitCheckoutDestinationLabel =
       gitCheckoutParentPath ?? workspaceBridgeRoot ?? 'Bridge default workspace';
     const gitCheckoutTargetPath =
@@ -7590,6 +8105,17 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const selectedThreadRuntimeSnapshot = selectedChat
       ? threadRuntimeSnapshotsRef.current[selectedChat.id] ?? null
       : null;
+    const selectedBridgeUiSurfaces = selectedChat
+      ? activeBridgeUiSurfaces.filter((surface) => surface.threadId === selectedChat.id)
+      : [];
+    const workflowBridgeUiSurfaces = selectedBridgeUiSurfaces.filter(
+      (surface) => surface.presentation === 'workflowCard'
+    );
+    const bannerBridgeUiSurfaces = selectedBridgeUiSurfaces.filter(
+      (surface) => surface.presentation === 'banner'
+    );
+    const modalBridgeUiSurface =
+      selectedBridgeUiSurfaces.find((surface) => surface.presentation === 'modal') ?? null;
     const selectedBridgeQueuedMessages = selectedThreadRuntimeSnapshot?.queuedMessages ?? [];
     const selectedOptimisticQueuedMessages = selectedChat
       ? pendingOptimisticQueuedMessagesRef.current[selectedChat.id] ?? []
@@ -7689,12 +8215,14 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
       hasStructuredPlan: showStructuredPlanCard,
       hasPlanApprovalPrompt: showPlanImplementationPrompt,
     });
-    const showTopCardsRow = !isOpeningChat && workflowCardMode !== null;
+    const showTopCardsRow =
+      !isOpeningChat && (workflowCardMode !== null || workflowBridgeUiSurfaces.length > 0);
     const showFloatingActivity =
       shouldShowComposer &&
       Boolean(selectedChat) &&
       !isOpeningChat &&
-      !showBridgeRecoveryBanner;
+      !showBridgeRecoveryBanner &&
+      !showUsageLimitBanner;
     const chatBottomInset = shouldShowComposer
       ? theme.spacing.lg
       : Math.max(theme.spacing.xxl, safeAreaInsets.bottom + theme.spacing.lg);
@@ -7702,7 +8230,11 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const composerOverlayInset =
       Platform.OS === 'android' && keyboardVisible ? androidKeyboardInset : 0;
     const visibleError =
-      !ws.isConnected && isBridgeConnectionErrorMessage(error) ? null : error;
+      !ws.isConnected && isBridgeConnectionErrorMessage(error)
+        ? null
+        : usageLimitAlert && isRateLimitReachedMessage(error)
+          ? null
+          : error;
     const androidComposerReservedInset = shouldShowComposer
       ? Math.max(
           theme.spacing.lg,
@@ -7740,10 +8272,11 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 />
               </View>
               <View style={styles.bridgeRecoveryBannerCopy}>
-                <Text style={styles.bridgeRecoveryBannerTitle}>Bridge disconnected</Text>
+                <Text style={styles.bridgeRecoveryBannerTitle}>
+                  Bridge disconnected
+                </Text>
                 <Text style={styles.bridgeRecoveryBannerBody}>
-                  Start the bridge on your computer to continue. The app will reconnect
-                  automatically.
+                  Start the bridge on your computer to continue. The app will reconnect automatically.
                 </Text>
               </View>
             </View>
@@ -7762,6 +8295,44 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             ) : null}
           </View>
         ) : null}
+        {!showBridgeRecoveryBanner && showUsageLimitBanner && usageLimitAlert ? (
+          <View style={styles.bridgeRecoveryBanner}>
+            <View style={styles.bridgeRecoveryBannerTopRow}>
+              <View style={styles.bridgeRecoveryBannerIconWrap}>
+                <Ionicons
+                  name="warning-outline"
+                  size={16}
+                  color={theme.colors.warning}
+                />
+              </View>
+              <View style={styles.bridgeRecoveryBannerCopy}>
+                <Text style={styles.bridgeRecoveryBannerTitle}>
+                  {usageLimitAlert.title}
+                </Text>
+                <Text style={styles.bridgeRecoveryBannerBody}>
+                  {usageLimitAlert.body}
+                </Text>
+                {usageLimitAlert.status ? (
+                  <Text style={styles.bridgeRecoveryBannerStatus}>
+                    {usageLimitAlert.status}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        ) : null}
+        {!showBridgeRecoveryBanner && !showUsageLimitBanner
+          ? bannerBridgeUiSurfaces.map((surface) => (
+              <BridgeUiBanner
+                key={surface.id}
+                surface={surface}
+                onAction={handleBridgeUiAction}
+                onDismiss={(nextSurface) => {
+                  void dismissBridgeUiSurface(nextSurface);
+                }}
+              />
+            ))
+          : null}
         {pendingApproval ? (
           <ApprovalBanner
             approval={pendingApproval}
@@ -8061,6 +8632,31 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     }, [selectedChat?.id, selectedThreadPlan?.turnId]);
 
     useEffect(() => {
+      const threadId = selectedChat?.id;
+      if (
+        !threadId ||
+        !shouldCollapseWorkflowCardForKeyboard({
+          collapsed: planPanelCollapsed,
+          keyboardVisible,
+          mode: workflowCardMode,
+          threadId,
+        })
+      ) {
+        return;
+      }
+
+      setPlanPanelCollapsedByThread((prev) => {
+        if (prev[threadId] === true) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [threadId]: true,
+        };
+      });
+    }, [keyboardVisible, planPanelCollapsed, selectedChat?.id, workflowCardMode]);
+
+    useEffect(() => {
       if (!showLiveAgentPanel) {
         setAgentPanelCollapsed(false);
       }
@@ -8086,6 +8682,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
         <ChatHeader
           onOpenDrawer={onOpenDrawer}
           title={headerTitle}
+          engine={selectedChat?.engine}
           engineLabel={selectedChat ? getChatEngineLabel(selectedChat.engine) : undefined}
           onOpenTitleMenu={selectedChat ? openChatTitleMenu : undefined}
           rightIconName={selectedChat ? 'git-branch-outline' : undefined}
@@ -8185,6 +8782,17 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
 
         {showTopCardsRow ? (
           <View style={styles.topCardsRow}>
+            {workflowBridgeUiSurfaces.map((surface) => (
+              <BridgeUiWorkflowCard
+                key={surface.id}
+                surface={surface}
+                scrollMaxHeight={Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360))}
+                onAction={handleBridgeUiAction}
+                onDismiss={(nextSurface) => {
+                  void dismissBridgeUiSurface(nextSurface);
+                }}
+              />
+            ))}
             {workflowCardMode ? (
               <WorkflowCard
                 mode={workflowCardMode}
@@ -8229,7 +8837,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           <View style={styles.bodyContainer}>
             <KeyboardAvoidingView style={styles.keyboardAvoiding} enabled={false}>
               {selectedChat && !isOpeningChat ? (
-                <ChatView
+                <ChatTranscriptView
+                  key={selectedChat.id}
                   chat={selectedChat}
                   parentChat={selectedParentChat}
                   bridgeUrl={bridgeUrl}
@@ -8247,10 +8856,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                   bottomInset={androidComposerReservedInset}
                 />
               ) : isOpeningChat ? (
-                <View style={styles.chatLoadingContainer}>
-                  <ActivityIndicator size="small" color={theme.colors.textMuted} />
-                  <Text style={styles.chatLoadingText}>Opening chat...</Text>
-                </View>
+                <ChatOpeningView />
               ) : (
                 <ComposeView
                   startWorkspaceLabel={defaultStartWorkspaceLabel}
@@ -8283,7 +8889,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             enabled={Platform.OS === 'ios'}
           >
             {selectedChat && !isOpeningChat ? (
-              <ChatView
+              <ChatTranscriptView
+                key={selectedChat.id}
                 chat={selectedChat}
                 parentChat={selectedParentChat}
                 bridgeUrl={bridgeUrl}
@@ -8301,10 +8908,7 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                 bottomInset={chatBottomInset}
               />
             ) : isOpeningChat ? (
-              <View style={styles.chatLoadingContainer}>
-                <ActivityIndicator size="small" color={theme.colors.textMuted} />
-                <Text style={styles.chatLoadingText}>Opening chat...</Text>
-              </View>
+              <ChatOpeningView />
             ) : (
               <ComposeView
                 startWorkspaceLabel={defaultStartWorkspaceLabel}
@@ -8410,20 +9014,21 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           }
           bridgeRoot={workspaceBridgeRoot}
           recentWorkspaces={workspaceRoots}
+          favoriteWorkspacePaths={favoriteWorkspacePaths}
           currentPath={workspaceBrowsePath}
           parentPath={workspaceBrowseParentPath}
           entries={workspaceBrowseEntries}
-          loadingRecent={loadingWorkspaceRoots}
           loadingEntries={loadingWorkspaceBrowse}
           error={workspaceBrowseError}
           onBrowsePath={(path) => void browseWorkspacePath(path)}
           onSelectPath={handleWorkspaceSelection}
+          onToggleFavorite={toggleWorkspaceFavorite}
           actionLabel={
-            workspacePickerPurpose === 'default-start' ? 'Clone repository here' : null
+            workspacePickerPurpose === 'default-start' ? 'Clone Repo' : null
           }
           actionDescription={
             workspacePickerPurpose === 'default-start'
-              ? 'Use the folder you already have selected or open as the destination for a fresh checkout.'
+              ? 'Into this workspace'
               : null
           }
           onActionPress={
@@ -8443,17 +9048,19 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
           animationType="fade"
           onRequestClose={closeGitCheckoutModal}
         >
-          <View style={styles.renameModalBackdrop}>
-            <KeyboardAvoidingView
-              style={styles.renameModalKeyboardAvoider}
-              behavior={Platform.OS === 'ios' ? 'position' : 'height'}
-              keyboardVerticalOffset={
-                Platform.OS === 'ios'
-                  ? Math.max(theme.spacing.xl * 2, safeAreaInsets.bottom + theme.spacing.md)
-                  : 0
-              }
-            >
-              <View style={styles.renameModalKeyboardContent}>
+          <KeyboardAvoidingView
+            style={styles.renameModalKeyboardAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? safeAreaInsets.bottom : 0}
+          >
+            <View style={styles.renameModalBackdrop}>
+              <View
+                style={[
+                  styles.renameModalKeyboardContent,
+                  styles.renameModalKeyboardContentBottom,
+                  { paddingBottom: theme.spacing.md },
+                ]}
+              >
                 <View style={styles.renameModalCard}>
                   <Text style={styles.renameModalTitle}>Git checkout</Text>
                   <Text style={styles.gitCheckoutHint}>
@@ -8551,8 +9158,8 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
                   </View>
                 </View>
               </View>
-            </KeyboardAvoidingView>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <SelectionSheet
@@ -8851,6 +9458,15 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
             </View>
           </View>
         </Modal>
+        {modalBridgeUiSurface ? (
+          <BridgeUiModal
+            surface={modalBridgeUiSurface}
+            onAction={handleBridgeUiAction}
+            onDismiss={(surface) => {
+              void dismissBridgeUiSurface(surface);
+            }}
+          />
+        ) : null}
       </View>
     );
   }
@@ -9015,23 +9631,6 @@ interface AgentThreadPanelRow {
   selected: boolean;
 }
 
-interface ChatViewProps {
-  chat: Chat;
-  parentChat: Chat | null;
-  bridgeUrl: string;
-  bridgeToken: string | null;
-  onOpenLocalPreview?: (targetUrl: string) => void;
-  showToolCalls: boolean;
-  agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
-  scrollRef: React.RefObject<FlatList<TranscriptDisplayItem> | null>;
-  inlineChoicesEnabled: boolean;
-  onInlineOptionSelect: (value: string) => void;
-  onPinnedAutoScroll: (animated?: boolean) => void;
-  onJumpToLatest: () => void;
-  onScrollInteractionStart: () => void;
-  autoScrollStateRef: React.MutableRefObject<AutoScrollState>;
-  bottomInset: number;
-}
 
 function AgentThreadsPanel({
   rows,
@@ -9159,323 +9758,24 @@ function AgentThreadsPanel({
 
 // ── Chat View ──────────────────────────────────────────────────────
 
-const ChatView = memo(function ChatView({
-  chat,
-  parentChat,
-  bridgeUrl,
-  bridgeToken,
-  onOpenLocalPreview,
-  showToolCalls,
-  agentThreadStatusById,
-  scrollRef,
-  inlineChoicesEnabled,
-  onInlineOptionSelect,
-  onPinnedAutoScroll,
-  onJumpToLatest,
-  onScrollInteractionStart,
-  autoScrollStateRef,
-  bottomInset,
-}: ChatViewProps) {
+function ChatOpeningView() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-
-  const transcriptView = useMemo(() => {
-    const childVisibleMessages = getVisibleTranscriptMessages(
-      filterReasoningMessagesForEngine(chat.messages, chat.engine),
-      showToolCalls
-    );
-    if (!chat.parentThreadId || !parentChat) {
-      return {
-        messages: childVisibleMessages,
-        hiddenInheritedMessageCount: 0,
-      };
-    }
-
-    const parentVisibleMessages = getVisibleTranscriptMessages(
-      filterReasoningMessagesForEngine(parentChat.messages, parentChat.engine),
-      showToolCalls
-    );
-    return trimInheritedParentMessages(parentVisibleMessages, childVisibleMessages, chat.id);
-  }, [chat.messages, chat.parentThreadId, parentChat, showToolCalls]);
-  const visibleMessages = useMemo(
-    () => syncVisibleSubAgentStatuses(transcriptView.messages, agentThreadStatusById),
-    [agentThreadStatusById, transcriptView.messages]
-  );
-  const [visibleStartIndex, setVisibleStartIndex] = useState(() =>
-    getInitialVisibleMessageStartIndex(visibleMessages.length)
-  );
-  const paginatedMessages = useMemo(
-    () => visibleMessages.slice(visibleStartIndex),
-    [visibleMessages, visibleStartIndex]
-  );
-  const displayItems = useMemo(
-    () => buildTranscriptDisplayItems(paginatedMessages),
-    [paginatedMessages]
-  );
-  const displayMessages = useMemo(
-    () => [...displayItems].reverse(),
-    [displayItems]
-  );
-  const olderMessageCount = visibleStartIndex;
-  const hasOlderMessages = olderMessageCount > 0;
-  const inlineChoiceSet = useMemo(
-    () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
-    [inlineChoicesEnabled, paginatedMessages]
-  );
-  useEffect(() => {
-    setVisibleStartIndex(getInitialVisibleMessageStartIndex(visibleMessages.length));
-  }, [chat.id]);
-
-  useEffect(() => {
-    setVisibleStartIndex((current) => {
-      const maxStartIndex = Math.max(visibleMessages.length - 1, 0);
-      return current > maxStartIndex ? maxStartIndex : current;
-    });
-  }, [visibleMessages.length]);
-
-  const loadOlderMessages = useCallback(() => {
-    setVisibleStartIndex((current) =>
-      Math.max(0, current - CHAT_MESSAGE_PAGE_SIZE)
-    );
-  }, []);
-
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset } = event.nativeEvent;
-      const distanceFromBottom = contentOffset.y;
-      const shouldStickToBottom = distanceFromBottom <= theme.spacing.xl * 2;
-      autoScrollStateRef.current.shouldStickToBottom = shouldStickToBottom;
-      setShowJumpToLatest((current) =>
-        current === !shouldStickToBottom ? current : !shouldStickToBottom
-      );
-    },
-    [autoScrollStateRef, theme.spacing.xl]
-  );
-
-  useEffect(() => {
-    autoScrollStateRef.current.shouldStickToBottom = true;
-    autoScrollStateRef.current.isUserInteracting = false;
-    autoScrollStateRef.current.isMomentumScrolling = false;
-    setShowJumpToLatest(false);
-  }, [autoScrollStateRef, chat.id]);
-  const messageListContentStyle = useMemo(
-    () =>
-      Platform.OS === 'android'
-        ? [styles.messageListContent, { paddingTop: bottomInset }]
-        : [styles.messageListContent, { paddingBottom: bottomInset }],
-    [bottomInset, styles.messageListContent]
-  );
-  const isLargeChat = displayItems.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
-  const keyExtractor = useCallback(
-    (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
-    []
-  );
-  const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
-    ({ item }) => {
-      if (item.kind === 'toolGroup') {
-        return (
-          <View style={styles.chatMessageBlock}>
-            <ToolActivityGroup
-              messages={item.messages}
-              bridgeUrl={bridgeUrl}
-              bridgeToken={bridgeToken}
-            />
-          </View>
-        );
-      }
-
-      const msg = item.message;
-      const showInlineChoices = inlineChoiceSet?.messageId === msg.id;
-      return (
-        <View style={styles.chatMessageBlock}>
-          <ChatMessage
-            message={msg}
-            bridgeUrl={bridgeUrl}
-            bridgeToken={bridgeToken}
-            onOpenLocalPreview={onOpenLocalPreview}
-          />
-          {showInlineChoices ? (
-            <View style={styles.inlineChoiceOptions}>
-              {inlineChoiceSet.options.map((option, index) => (
-                <Pressable
-                  key={`${msg.id}-${index}-${option.label}`}
-                  style={({ pressed }) => [
-                    styles.inlineChoiceOptionButton,
-                    pressed && styles.inlineChoiceOptionButtonPressed,
-                  ]}
-                  onPress={() => onInlineOptionSelect(option.label)}
-                >
-                  <View style={styles.inlineChoiceOptionRow}>
-                    <Text style={styles.inlineChoiceOptionIndex}>{`${String(index + 1)}.`}</Text>
-                    <Text style={styles.inlineChoiceOptionLabel}>{option.label}</Text>
-                  </View>
-                  {option.description.trim() ? (
-                    <Text style={styles.inlineChoiceOptionDescription}>
-                      {option.description}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              ))}
-              <Text style={styles.inlineChoiceHint}>
-                Tap an option to fill the reply box.
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      );
-    },
-    [bridgeToken, bridgeUrl, inlineChoiceSet, onInlineOptionSelect]
-  );
-
-  const paginationHeader = useMemo(() => {
-    if (!hasOlderMessages) {
-      return null;
-    }
-
-    const olderBatchCount = Math.min(CHAT_MESSAGE_PAGE_SIZE, olderMessageCount);
-    return (
-      <View style={styles.messagePaginationWrap}>
-        <Pressable
-          onPress={loadOlderMessages}
-          style={({ pressed }) => [
-            styles.messagePaginationButton,
-            pressed && styles.messagePaginationButtonPressed,
-          ]}>
-          <Ionicons
-            name="chevron-up-circle-outline"
-            size={16}
-            color={theme.colors.textPrimary}
-          />
-          <Text style={styles.messagePaginationButtonText}>
-            {`Load ${String(olderBatchCount)} earlier message${
-              olderBatchCount === 1 ? '' : 's'
-            }`}
-          </Text>
-        </Pressable>
-        <Text style={styles.messagePaginationMeta}>
-          {`Showing ${String(paginatedMessages.length)} of ${String(visibleMessages.length)} messages`}
-        </Text>
-      </View>
-    );
-  }, [
-    hasOlderMessages,
-    loadOlderMessages,
-    olderMessageCount,
-    paginatedMessages.length,
-    visibleMessages.length,
-  ]);
 
   return (
-    <View style={styles.messageListShell}>
-      <FlatList
-        key={chat.id}
-        ref={scrollRef}
-        data={displayMessages}
-        keyExtractor={keyExtractor}
-        renderItem={renderMessageItem}
-        ListFooterComponent={paginationHeader}
-        style={styles.messageList}
-        contentContainerStyle={messageListContentStyle}
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-        inverted
-        showsVerticalScrollIndicator={false}
-        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-        keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={() => {
-          onScrollInteractionStart();
-          Keyboard.dismiss();
-          autoScrollStateRef.current.isUserInteracting = true;
-          autoScrollStateRef.current.isMomentumScrolling = false;
-          autoScrollStateRef.current.shouldStickToBottom = false;
-        }}
-        onScrollEndDrag={() => {
-          if (!autoScrollStateRef.current.isMomentumScrolling) {
-            autoScrollStateRef.current.isUserInteracting = false;
-          }
-        }}
-        onMomentumScrollBegin={() => {
-          autoScrollStateRef.current.isMomentumScrolling = true;
-        }}
-        onMomentumScrollEnd={() => {
-          autoScrollStateRef.current.isUserInteracting = false;
-          autoScrollStateRef.current.isMomentumScrolling = false;
-        }}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        onContentSizeChange={() => {
-          onPinnedAutoScroll(false);
-        }}
-        initialNumToRender={Math.min(displayMessages.length, 16)}
-        maxToRenderPerBatch={Math.min(displayMessages.length, 12)}
-        updateCellsBatchingPeriod={isLargeChat ? 16 : undefined}
-        windowSize={isLargeChat ? 15 : 11}
-        removeClippedSubviews={Platform.OS === 'android'}
-      />
-      {showJumpToLatest ? (
-        <Pressable
-          onPress={() => {
-            autoScrollStateRef.current.shouldStickToBottom = true;
-            autoScrollStateRef.current.isUserInteracting = false;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-            setShowJumpToLatest(false);
-            onJumpToLatest();
-          }}
-          style={({ pressed }) => [
-            styles.jumpToLatestButton,
-            { bottom: bottomInset + theme.spacing.xs },
-            pressed && styles.jumpToLatestButtonPressed,
-          ]}
-        >
-          <Ionicons
-            name="arrow-down"
-            size={14}
-            color={theme.colors.textPrimary}
-          />
-        </Pressable>
-      ) : null}
+    <View style={styles.chatOpeningShell}>
+      <View style={styles.chatOpeningCard}>
+        <View style={styles.chatOpeningTopRow}>
+          <ActivityIndicator size="small" color={theme.colors.textMuted} />
+          <Text style={styles.chatOpeningTitle}>Opening chat</Text>
+        </View>
+        <View style={styles.chatOpeningBubbleWide} />
+        <View style={styles.chatOpeningBubbleShort} />
+      </View>
     </View>
   );
-}, areChatViewPropsEqual);
-
-function areChatViewPropsEqual(previous: ChatViewProps, next: ChatViewProps): boolean {
-  return (
-    areChatsEquivalentForTranscript(previous.chat, next.chat) &&
-    areChatsEquivalentForTranscript(previous.parentChat, next.parentChat) &&
-    previous.bridgeUrl === next.bridgeUrl &&
-    previous.bridgeToken === next.bridgeToken &&
-    previous.onOpenLocalPreview === next.onOpenLocalPreview &&
-    previous.showToolCalls === next.showToolCalls &&
-    previous.agentThreadStatusById === next.agentThreadStatusById &&
-    previous.scrollRef === next.scrollRef &&
-    previous.inlineChoicesEnabled === next.inlineChoicesEnabled &&
-    previous.onInlineOptionSelect === next.onInlineOptionSelect &&
-    previous.onPinnedAutoScroll === next.onPinnedAutoScroll &&
-    previous.onJumpToLatest === next.onJumpToLatest &&
-    previous.onScrollInteractionStart === next.onScrollInteractionStart &&
-    previous.autoScrollStateRef === next.autoScrollStateRef &&
-    previous.bottomInset === next.bottomInset
-  );
 }
 
-function areChatsEquivalentForTranscript(
-  previous: Chat | null,
-  next: Chat | null
-): boolean {
-  if (previous === next) {
-    return true;
-  }
-  if (!previous || !next) {
-    return previous === next;
-  }
-
-  return (
-    previous.id === next.id &&
-    previous.parentThreadId === next.parentThreadId &&
-    previous.engine === next.engine &&
-    previous.messages === next.messages
-  );
-}
 
 function areChatStatusMapsEquivalent(
   previous: ReadonlyMap<string, Chat['status']>,
@@ -10052,3199 +10352,3 @@ function QueuedMessageDock({
     </View>
   );
 }
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-function readStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const values = value.filter((entry): entry is string => typeof entry === 'string');
-  return values.length > 0 ? values : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function readIntegerLike(value: unknown): number | null {
-  const numberValue = readNumber(value);
-  if (numberValue !== null) {
-    return Math.max(0, Math.floor(numberValue));
-  }
-
-  const stringValue = readString(value)?.trim();
-  if (!stringValue) {
-    return null;
-  }
-
-  const parsed = Number(stringValue);
-  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
-}
-
-function readBoolean(value: unknown): boolean | null {
-  return typeof value === 'boolean' ? value : null;
-}
-
-function mergeThreadContextUsage(
-  previous: ThreadContextUsage | null,
-  next: ThreadContextUsage | null
-): ThreadContextUsage | null {
-  if (!next) {
-    return previous;
-  }
-
-  return {
-    totalTokens: next.totalTokens ?? previous?.totalTokens ?? null,
-    lastTokens: next.lastTokens ?? previous?.lastTokens ?? null,
-    modelContextWindow: next.modelContextWindow ?? previous?.modelContextWindow ?? null,
-    updatedAtMs: next.updatedAtMs,
-  };
-}
-
-function formatTokenCount(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) {
-    const millions = value / 1_000_000;
-    return `${millions >= 10 ? millions.toFixed(0) : millions.toFixed(1)}M`;
-  }
-
-  if (abs >= 1_000) {
-    const thousands = value / 1_000;
-    return `${thousands >= 10 ? thousands.toFixed(0) : thousands.toFixed(1)}k`;
-  }
-
-  return String(Math.round(value));
-}
-
-function compactPlanDelta(value: string): string {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join('\n')
-    .slice(-1200);
-}
-
-function buildNextPlanStateFromDelta(
-  previous: ActivePlanState | null,
-  threadId: string,
-  turnId: string,
-  rawDelta: string
-): ActivePlanState {
-  const sameTurn =
-    previous && previous.threadId === threadId && previous.turnId === turnId;
-  const nextDelta = compactPlanDelta(
-    sameTurn ? `${previous.deltaText}\n${rawDelta}` : rawDelta
-  );
-
-  return {
-    threadId,
-    turnId,
-    explanation: sameTurn ? previous.explanation : null,
-    steps: sameTurn ? previous.steps : [],
-    deltaText: nextDelta,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function buildNextPlanStateFromUpdate(
-  previous: ActivePlanState | null,
-  next: {
-    threadId: string;
-    turnId: string;
-    explanation: string | null;
-    plan: TurnPlanStep[];
-  }
-): ActivePlanState {
-  const sameTurn =
-    previous &&
-    previous.threadId === next.threadId &&
-    previous.turnId === next.turnId;
-
-  return {
-    threadId: next.threadId,
-    turnId: next.turnId,
-    explanation: next.explanation,
-    steps: next.plan,
-    deltaText: sameTurn ? previous.deltaText : '',
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function renderPlanStatusGlyph(status: TurnPlanStep['status']): string {
-  if (status === 'completed') {
-    return '✔';
-  }
-  if (status === 'inProgress') {
-    return '□';
-  }
-  return '□';
-}
-
-function toTurnPlanUpdate(
-  value: unknown,
-  fallbackThreadId: string | null = null
-): {
-  threadId: string;
-  turnId: string;
-  explanation: string | null;
-  plan: TurnPlanStep[];
-} | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const threadId = readString(record.threadId) ?? fallbackThreadId;
-  const turnId = readString(record.turnId);
-  if (!threadId || !turnId) {
-    return null;
-  }
-
-  const rawPlan = Array.isArray(record.plan) ? record.plan : [];
-  const plan: TurnPlanStep[] = rawPlan
-    .map((item) => {
-      const itemRecord = toRecord(item);
-      if (!itemRecord) {
-        return null;
-      }
-
-      const step = readString(itemRecord.step);
-      const status = readString(itemRecord.status);
-      if (
-        !step ||
-        (status !== 'pending' && status !== 'inProgress' && status !== 'completed')
-      ) {
-        return null;
-      }
-
-      return {
-        step,
-        status,
-      } satisfies TurnPlanStep;
-    })
-    .filter((item): item is TurnPlanStep => item !== null);
-
-  return {
-    threadId,
-    turnId,
-    explanation: readString(record.explanation),
-    plan,
-  };
-}
-
-function resolveCodexPlanTurnId(
-  value: Record<string, unknown> | null,
-  fallbackTurnId: string | null = null
-): string {
-  return (
-    readString(value?.turnId) ??
-    readString(value?.turn_id) ??
-    fallbackTurnId ??
-    'unknown-turn'
-  );
-}
-
-function toCodexTurnPlanUpdate(
-  value: Record<string, unknown> | null,
-  threadId: string,
-  fallbackTurnId: string | null = null
-): {
-  threadId: string;
-  turnId: string;
-  explanation: string | null;
-  plan: TurnPlanStep[];
-} | null {
-  if (!value) {
-    return null;
-  }
-
-  return toTurnPlanUpdate(
-    {
-      ...value,
-      threadId,
-      turnId: resolveCodexPlanTurnId(value, fallbackTurnId),
-    },
-    threadId
-  );
-}
-
-function toPendingUserInputRequest(value: unknown): PendingUserInputRequest | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const id = readString(record.id);
-  const threadId = readString(record.threadId);
-  const turnId = readString(record.turnId);
-  const itemId = readString(record.itemId);
-  const requestedAt = readString(record.requestedAt);
-  const rawQuestions = Array.isArray(record.questions) ? record.questions : [];
-  if (!id || !threadId || !turnId || !itemId || !requestedAt || rawQuestions.length === 0) {
-    return null;
-  }
-
-  const questions = rawQuestions
-    .map((item) => {
-      const itemRecord = toRecord(item);
-      if (!itemRecord) {
-        return null;
-      }
-
-      const questionId = readString(itemRecord.id);
-      const header = readString(itemRecord.header);
-      const question = readString(itemRecord.question);
-      if (!questionId || !header || !question) {
-        return null;
-      }
-
-      const parsedInlineOptions = parseInlineOptionsFromQuestionText(question);
-
-      const parsedOptions = Array.isArray(itemRecord.options)
-        ? itemRecord.options
-            .map((option) => {
-              const optionRecord = toRecord(option);
-              if (!optionRecord) {
-                return null;
-              }
-
-              const label =
-                readString(optionRecord.label) ??
-                readString(optionRecord.title) ??
-                readString(optionRecord.value) ??
-                readString(optionRecord.text);
-              const description =
-                readString(optionRecord.description) ??
-                readString(optionRecord.detail) ??
-                '';
-              if (!label) {
-                return null;
-              }
-              return {
-                label,
-                description,
-              };
-            })
-            .filter(
-              (option): option is { label: string; description: string } => option !== null
-            )
-        : null;
-      const options =
-        parsedOptions && parsedOptions.length > 0
-          ? parsedOptions
-          : parsedInlineOptions.options;
-
-      return {
-        id: questionId,
-        header,
-        question: parsedInlineOptions.question,
-        isOther: readBoolean(itemRecord.isOther) ?? false,
-        isSecret: readBoolean(itemRecord.isSecret) ?? false,
-        options,
-      } satisfies PendingUserInputRequest['questions'][number];
-    })
-    .filter(
-      (question): question is PendingUserInputRequest['questions'][number] =>
-        question !== null
-    );
-
-  if (questions.length === 0) {
-    return null;
-  }
-
-  return {
-    id,
-    threadId,
-    turnId,
-    itemId,
-    requestedAt,
-    questions,
-  };
-}
-
-function buildUserInputDrafts(request: PendingUserInputRequest): Record<string, string> {
-  const drafts: Record<string, string> = {};
-  for (const question of request.questions) {
-    drafts[question.id] = '';
-  }
-  return drafts;
-}
-
-function normalizeQuestionAnswers(value: string): string[] {
-  return value
-    .split('\n')
-    .flatMap((line) => line.split(','))
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function findInlineChoiceSet(messages: ChatTranscriptMessage[]): {
-  messageId: string;
-  options: Array<{ label: string; description: string }>;
-} | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role !== 'assistant') {
-      continue;
-    }
-
-    if (message.content.length > 1200) {
-      continue;
-    }
-
-    const parsed = parseInlineOptionsFromQuestionText(message.content);
-    if (!parsed.options || parsed.options.length < 2 || parsed.options.length > 5) {
-      continue;
-    }
-
-    const cueSource = parsed.question.trim();
-    const hasCue =
-      cueSource.includes('?') ||
-      INLINE_CHOICE_CUE_PATTERNS.some((pattern) => pattern.test(cueSource));
-    if (!hasCue) {
-      continue;
-    }
-
-    return {
-      messageId: message.id,
-      options: parsed.options,
-    };
-  }
-
-  return null;
-}
-
-function stripOptionText(value: string): string {
-  return value
-    .replace(/^[`*_~]+/g, '')
-    .replace(/[`*_~]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function splitOptionLine(value: string): { label: string; description: string } {
-  const normalized = value.replace(/^[-*+\u2022]\s+/, '').trim();
-  if (!normalized) {
-    return {
-      label: '',
-      description: '',
-    };
-  }
-
-  const separators = [' \u2014 ', ' - ', ': '];
-  for (const separator of separators) {
-    const separatorIndex = normalized.indexOf(separator);
-    if (separatorIndex <= 0 || separatorIndex >= normalized.length - separator.length) {
-      continue;
-    }
-
-    const label = stripOptionText(normalized.slice(0, separatorIndex));
-    const description = stripOptionText(
-      normalized.slice(separatorIndex + separator.length)
-    );
-    if (!label) {
-      continue;
-    }
-
-    return {
-      label,
-      description,
-    };
-  }
-
-  return {
-    label: stripOptionText(normalized),
-    description: '',
-  };
-}
-
-function isLikelyOptionContinuationLine(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  return (
-    /^[-*+\u2022]\s+/.test(trimmed) ||
-    /^(impact|trade[- ]?off|reason|because|benefit|cost|why)\b/i.test(trimmed)
-  );
-}
-
-function parseInlineOptionsFromQuestionText(value: string): {
-  question: string;
-  options: Array<{ label: string; description: string }> | null;
-} {
-  const lines = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length === 0) {
-    return {
-      question: value,
-      options: null,
-    };
-  }
-
-  const promptLines: string[] = [];
-  const options: Array<{ label: string; description: string }> = [];
-  let hasMatchedOptionLine = false;
-
-  for (const line of lines) {
-    const optionMatch = line.match(INLINE_OPTION_LINE_PATTERN);
-    if (optionMatch) {
-      const parsed = splitOptionLine(optionMatch[1] ?? '');
-      if (parsed.label) {
-        options.push(parsed);
-        hasMatchedOptionLine = true;
-        continue;
-      }
-    }
-
-    if (hasMatchedOptionLine && options.length > 0 && isLikelyOptionContinuationLine(line)) {
-      const continuation = stripOptionText(line.replace(/^[-*+\u2022]\s+/, ''));
-      if (continuation) {
-        const lastOption = options[options.length - 1];
-        lastOption.description = lastOption.description
-          ? `${lastOption.description} ${continuation}`
-          : continuation;
-      }
-      continue;
-    }
-
-    promptLines.push(line);
-  }
-
-  if (options.length < 2) {
-    return {
-      question: value,
-      options: null,
-    };
-  }
-
-  const question = promptLines.length > 0 ? promptLines.join('\n') : 'Select one option.';
-
-  return {
-    question,
-    options,
-  };
-}
-
-function normalizeWorkspacePath(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeAttachmentPath(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeCloneDirectoryName(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '.' || trimmed === '..') {
-    return null;
-  }
-  if (/[\\/]/.test(trimmed)) {
-    return null;
-  }
-
-  return trimmed;
-}
-
-function deriveCloneDirectoryName(url: string | null | undefined): string | null {
-  if (typeof url !== 'string') {
-    return null;
-  }
-
-  const trimmed = url.trim().replace(/\/+$/, '');
-  if (!trimmed) {
-    return null;
-  }
-
-  const lastSlash = trimmed.lastIndexOf('/');
-  const lastColon = trimmed.lastIndexOf(':');
-  const splitIndex = Math.max(lastSlash, lastColon);
-  const candidate = (splitIndex >= 0 ? trimmed.slice(splitIndex + 1) : trimmed).replace(
-    /\.git$/i,
-    ''
-  );
-
-  return normalizeCloneDirectoryName(candidate);
-}
-
-function joinWorkspacePath(parentPath: string, child: string): string {
-  const separator =
-    parentPath.includes('\\') && !parentPath.includes('/') ? '\\' : '/';
-  if (parentPath.endsWith('/') || parentPath.endsWith('\\')) {
-    return `${parentPath}${child}`;
-  }
-  return `${parentPath}${separator}${child}`;
-}
-
-function isAbsoluteWorkspacePath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
-}
-
-function resolveMentionPath(path: string, workspace: string | null | undefined): string {
-  const normalizedPath = normalizeAttachmentPath(path);
-  if (!normalizedPath) {
-    return path;
-  }
-  if (isAbsoluteWorkspacePath(normalizedPath)) {
-    return normalizedPath;
-  }
-
-  const normalizedWorkspace = normalizeWorkspacePath(workspace);
-  if (!normalizedWorkspace) {
-    return normalizedPath;
-  }
-
-  return joinWorkspacePath(normalizedWorkspace, normalizedPath);
-}
-
-function toMentionInput(path: string, workspace?: string | null): MentionInput {
-  const resolvedPath = resolveMentionPath(path, workspace);
-  const segments = resolvedPath.split(/[\\/]/).filter(Boolean);
-  const name = segments[segments.length - 1] ?? resolvedPath;
-  return {
-    path: resolvedPath,
-    name,
-  };
-}
-
-function toOptimisticUserContent(
-  content: string,
-  mentions: MentionInput[],
-  localImages: LocalImageInput[]
-): string {
-  if (mentions.length === 0 && localImages.length === 0) {
-    return content;
-  }
-
-  const mentionLines = mentions.map((mention) => `[file: ${mention.path}]`);
-  const localImageLines = localImages.map((image) => `[local image: ${image.path}]`);
-  return [content, ...mentionLines, ...localImageLines].join('\n');
-}
-
-function countUserMessages(messages: ChatTranscriptMessage[]): number {
-  let count = 0;
-  for (const message of messages) {
-    if (message.role === 'user') {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-function normalizeChatMessageMatchContent(value: string): string {
-  return value
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => !isSyntheticUserAttachmentLine(line))
-    .join('\n')
-    .trim();
-}
-
-function isSyntheticUserAttachmentLine(value: string): boolean {
-  return (
-    /^\[file:\s*(.+?)\]$/i.test(value) ||
-    /^\[local image:\s*(.+?)\]$/i.test(value) ||
-    /^\[image:\s*(.+?)\]$/i.test(value)
-  );
-}
-
-function reconcileChatWithPendingOptimisticMessages(
-  chat: Chat,
-  pendingMessages: PendingOptimisticUserMessage[]
-): {
-  chat: Chat;
-  remainingPendingMessages: PendingOptimisticUserMessage[];
-} {
-  if (pendingMessages.length === 0) {
-    return {
-      chat,
-      remainingPendingMessages: [],
-    };
-  }
-
-  const userMessages = chat.messages.filter((message) => message.role === 'user');
-  const remainingPendingMessages = pendingMessages.filter((entry) => {
-    const pendingContent = normalizeChatMessageMatchContent(entry.message.content);
-    const matchedUserMessage = userMessages[entry.userOrdinal - 1];
-
-    if (!matchedUserMessage) {
-      return true;
-    }
-
-    return normalizeChatMessageMatchContent(matchedUserMessage.content) !== pendingContent;
-  });
-
-  if (remainingPendingMessages.length === 0) {
-    return {
-      chat,
-      remainingPendingMessages,
-    };
-  }
-
-  const lastPendingMessage = remainingPendingMessages[remainingPendingMessages.length - 1]?.message;
-  return {
-    chat: {
-      ...chat,
-      lastMessagePreview:
-        normalizeChatMessageMatchContent(lastPendingMessage?.content ?? '').slice(0, 120) ||
-        chat.lastMessagePreview,
-      messages: [
-        ...chat.messages,
-        ...remainingPendingMessages.map((entry) => entry.message),
-      ],
-    },
-    remainingPendingMessages,
-  };
-}
-
-function toPathBasename(path: string): string {
-  const normalized = path.trim();
-  if (!normalized) {
-    return 'image';
-  }
-
-  const segments = normalized.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] ?? normalized;
-}
-
-function toAttachmentPathSuggestions(
-  candidates: string[],
-  query: string,
-  pendingMentionPaths: string[]
-): string[] {
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    return [];
-  }
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const selectedSet = new Set(pendingMentionPaths.map((path) => path.trim().toLowerCase()));
-  const exactBasenameMatches: string[] = [];
-  const basenamePrefixMatches: string[] = [];
-  const basenameContainsMatches: string[] = [];
-  const pathPrefixMatches: string[] = [];
-  const pathContainsMatches: string[] = [];
-
-  for (const candidate of candidates) {
-    const trimmed = candidate.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    const lowered = trimmed.toLowerCase();
-    if (selectedSet.has(lowered)) {
-      continue;
-    }
-
-    if (!normalizedQuery) {
-      pathPrefixMatches.push(trimmed);
-      if (pathPrefixMatches.length >= 8) {
-        break;
-      }
-      continue;
-    }
-
-    const basename = toPathBasename(trimmed).toLowerCase();
-
-    if (basename === normalizedQuery) {
-      exactBasenameMatches.push(trimmed);
-      continue;
-    }
-
-    if (basename.startsWith(normalizedQuery)) {
-      basenamePrefixMatches.push(trimmed);
-      continue;
-    }
-
-    if (lowered.startsWith(normalizedQuery)) {
-      pathPrefixMatches.push(trimmed);
-      continue;
-    }
-
-    if (basename.includes(normalizedQuery)) {
-      basenameContainsMatches.push(trimmed);
-      continue;
-    }
-
-    if (lowered.includes(`/${normalizedQuery}`) || lowered.includes(normalizedQuery)) {
-      pathContainsMatches.push(trimmed);
-    }
-  }
-
-  return [
-    ...exactBasenameMatches,
-    ...basenamePrefixMatches,
-    ...pathPrefixMatches,
-    ...basenameContainsMatches,
-    ...pathContainsMatches,
-  ].slice(0, 8);
-}
-
-function parseMentionQuery(input: string): string | null {
-  const normalized = input.replace(/\r\n/g, '\n');
-  const match = normalized.match(/(?:^|[\s(])@([^\s()]*)$/);
-  if (!match) {
-    return null;
-  }
-
-  return match[1] ?? '';
-}
-
-function replaceActiveMentionQueryWithSelection(input: string, label: string): string {
-  const trimmedLabel = label.trim();
-  if (!trimmedLabel) {
-    return input;
-  }
-
-  return input
-    .replace(/(^|[\s(])@[^\s()]*$/, (_match, prefix: string) => {
-      return `${prefix}@${trimmedLabel} `;
-    })
-    .replace(/[ \t]{2,}/g, ' ');
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function draftContainsMentionLabel(draft: string, label: string): boolean {
-  const trimmedLabel = label.trim();
-  if (!trimmedLabel) {
-    return false;
-  }
-
-  const pattern = new RegExp(`(^|[^\\w])@${escapeRegex(trimmedLabel)}(?=$|[^\\w])`, 'i');
-  return pattern.test(draft);
-}
-
-function normalizeModelId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeReasoningEffort(
-  effort: string | null | undefined
-): ReasoningEffort | null {
-  if (typeof effort !== 'string') {
-    return null;
-  }
-
-  const normalized = effort.trim().toLowerCase();
-  if (
-    normalized === 'none' ||
-    normalized === 'minimal' ||
-    normalized === 'low' ||
-    normalized === 'medium' ||
-    normalized === 'high' ||
-    normalized === 'xhigh'
-  ) {
-    return normalized;
-  }
-
-  return null;
-}
-
-function normalizeServiceTier(
-  serviceTier: string | null | undefined
-): ServiceTier | null {
-  if (typeof serviceTier !== 'string') {
-    return null;
-  }
-
-  const normalized = serviceTier.trim().toLowerCase();
-  if (normalized === 'flex' || normalized === 'fast') {
-    return normalized;
-  }
-
-  return null;
-}
-
-function toSelectedServiceTier(
-  serviceTier: ServiceTier | null | undefined
-): ServiceTier | null {
-  return serviceTier === 'fast' ? 'fast' : null;
-}
-
-function resolveSelectedServiceTier(
-  selectedServiceTier: SelectedServiceTier,
-  defaultServiceTier: ServiceTier | null | undefined
-): ServiceTier | null {
-  if (selectedServiceTier !== undefined) {
-    return toSelectedServiceTier(selectedServiceTier);
-  }
-
-  return toSelectedServiceTier(defaultServiceTier);
-}
-
-function toApprovalPolicyForMode(mode: ApprovalMode | null | undefined): ApprovalPolicy {
-  return mode === 'yolo' ? 'never' : 'untrusted';
-}
-
-function getChatModelPreferencesPath(): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
-    return null;
-  }
-
-  return `${base}${CHAT_MODEL_PREFERENCES_FILE}`;
-}
-
-function getChatDraftsPath(): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
-    return null;
-  }
-
-  return `${base}${CHAT_DRAFTS_FILE}`;
-}
-
-function getChatPlanSnapshotsPath(): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
-    return null;
-  }
-
-  return `${base}${CHAT_PLAN_SNAPSHOTS_FILE}`;
-}
-
-function parseChatDrafts(raw: string): Record<string, string> {
-  if (typeof raw !== 'string' || raw.trim().length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_DRAFTS_VERSION) {
-      return {};
-    }
-
-    const entries = toRecord(parsedRecord.entries);
-    if (!entries) {
-      return {};
-    }
-
-    const result: Record<string, string> = {};
-    for (const [rawKey, value] of Object.entries(entries)) {
-      const normalizedKey = getDraftScopeKey(rawKey);
-      const text = readString(value)?.replace(/\r\n/g, '\n');
-      if (!text || text.length === 0) {
-        continue;
-      }
-      result[normalizedKey] = text;
-    }
-
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueState | null {
-  const record = toRecord(value);
-  const threadId = readString(record?.threadId)?.trim();
-  if (!record || !threadId) {
-    return null;
-  }
-
-  const items = Array.isArray(record.items)
-    ? record.items
-        .map((item) => {
-          const entry = toRecord(item);
-          const id = readString(entry?.id)?.trim();
-          const createdAt = readString(entry?.createdAt)?.trim();
-          const content = readString(entry?.content)?.replace(/\r\n/g, '\n');
-          if (!id || !createdAt || !content) {
-            return null;
-          }
-
-          return {
-            id,
-            createdAt,
-            content,
-          } satisfies BridgeQueuedMessage;
-        })
-        .filter((item): item is BridgeQueuedMessage => item !== null)
-    : [];
-
-  const lastErrorRecord = toRecord(record.lastError);
-  const lastErrorMessage = readString(lastErrorRecord?.message)?.trim();
-  const lastErrorOperation = readString(lastErrorRecord?.operation)?.trim();
-  const lastErrorAt = readString(lastErrorRecord?.at)?.trim();
-  const lastError =
-    lastErrorMessage && lastErrorOperation && lastErrorAt
-      ? ({
-          message: lastErrorMessage,
-          operation: lastErrorOperation,
-          at: lastErrorAt,
-          itemId: readString(lastErrorRecord?.itemId)?.trim() ?? null,
-        } satisfies BridgeThreadQueueError)
-      : null;
-
-  return {
-    threadId,
-    items,
-    lastError,
-  };
-}
-
-function getDraftScopeKey(threadId: string | null | undefined): string {
-  const normalized = threadId?.trim();
-  return normalized && normalized.length > 0 ? normalized : CHAT_NEW_DRAFT_KEY;
-}
-
-function parseChatModelPreferences(raw: string): Record<string, ChatModelPreference> {
-  if (typeof raw !== 'string' || raw.trim().length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_MODEL_PREFERENCES_VERSION) {
-      return {};
-    }
-
-    const entries = toRecord(parsedRecord.entries);
-    if (!entries) {
-      return {};
-    }
-
-    const result: Record<string, ChatModelPreference> = {};
-    for (const [chatId, value] of Object.entries(entries)) {
-      const entry = toRecord(value);
-      if (!entry) {
-        continue;
-      }
-
-      const normalizedChatId = chatId.trim();
-      if (!normalizedChatId) {
-        continue;
-      }
-
-      result[normalizedChatId] = {
-        modelId: normalizeModelId(readString(entry.modelId)),
-        effort: normalizeReasoningEffort(readString(entry.effort)),
-        serviceTier: toSelectedServiceTier(
-          normalizeServiceTier(readString(entry.serviceTier))
-        ),
-        updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
-      };
-    }
-
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function parseChatPlanSnapshots(raw: string): Record<string, ActivePlanState> {
-  if (typeof raw !== 'string' || raw.trim().length === 0) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_PLAN_SNAPSHOTS_VERSION) {
-      return {};
-    }
-
-    const entries = toRecord(parsedRecord.entries);
-    if (!entries) {
-      return {};
-    }
-
-    const result: Record<string, ActivePlanState> = {};
-    for (const [chatId, value] of Object.entries(entries)) {
-      const entry = toRecord(value);
-      if (!entry) {
-        continue;
-      }
-
-      const normalizedChatId = chatId.trim();
-      const threadId = readString(entry.threadId) ?? normalizedChatId;
-      const turnId = readString(entry.turnId);
-      if (!normalizedChatId || !threadId || !turnId) {
-        continue;
-      }
-
-      const rawSteps = Array.isArray(entry.steps) ? entry.steps : [];
-      const steps: TurnPlanStep[] = rawSteps
-        .map((item) => {
-          const itemRecord = toRecord(item);
-          if (!itemRecord) {
-            return null;
-          }
-
-          const step = readString(itemRecord.step);
-          const status = readString(itemRecord.status);
-          if (
-            !step ||
-            (status !== 'pending' && status !== 'inProgress' && status !== 'completed')
-          ) {
-            return null;
-          }
-
-          return {
-            step,
-            status,
-          } satisfies TurnPlanStep;
-        })
-        .filter((item): item is TurnPlanStep => item !== null);
-
-      result[normalizedChatId] = {
-        threadId,
-        turnId,
-        explanation: readString(entry.explanation),
-        steps,
-        deltaText: readString(entry.deltaText) ?? '',
-        updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
-      };
-    }
-
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function formatCollaborationModeLabel(mode: CollaborationMode): string {
-  return mode === 'plan' ? 'Plan mode' : 'Default mode';
-}
-
-function isBridgeConnectionErrorMessage(value: string | null | undefined): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return (
-    normalized.includes('bridge websocket') ||
-    normalized.includes('unable to connect to bridge websocket')
-  );
-}
-
-function isBridgeRecoveryActivity(activity: ActivityState | null | undefined): boolean {
-  if (!activity) {
-    return false;
-  }
-
-  const normalizedTitle = activity.title.trim().toLowerCase();
-  if (normalizedTitle === 'disconnected' || normalizedTitle === 'bridge disconnected') {
-    return true;
-  }
-
-  return (
-    isBridgeConnectionErrorMessage(activity.title) ||
-    isBridgeConnectionErrorMessage(activity.detail)
-  );
-}
-
-function getInitialVisibleMessageStartIndex(totalMessageCount: number): number {
-  if (totalMessageCount <= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD) {
-    return 0;
-  }
-
-  return Math.max(0, totalMessageCount - CHAT_INITIAL_VISIBLE_MESSAGE_WINDOW);
-}
-
-function resolveSnapshotCollaborationMode(
-  snapshot: ThreadRuntimeSnapshot | null | undefined
-): CollaborationMode {
-  if (!snapshot) {
-    return 'default';
-  }
-
-  const hasActivePlanSnapshot =
-    Boolean(snapshot.plan) &&
-    (Boolean(snapshot.activeTurnId) || snapshot.activity?.title === 'Planning');
-  return snapshot.pendingUserInputRequest || hasActivePlanSnapshot ? 'plan' : 'default';
-}
-
-function resolveDisplayedThreadPlan(
-  snapshotPlan: ActivePlanState | null,
-  persistedPlan: ActivePlanState | null,
-  snapshot: ThreadRuntimeSnapshot | null | undefined
-): ActivePlanState | null {
-  if (!persistedPlan) {
-    return snapshotPlan;
-  }
-
-  if (!snapshotPlan) {
-    return persistedPlan;
-  }
-
-  if (snapshotPlan.turnId === persistedPlan.turnId) {
-    return {
-      ...snapshotPlan,
-      explanation: snapshotPlan.explanation ?? persistedPlan.explanation,
-      steps: snapshotPlan.steps.length > 0 ? snapshotPlan.steps : persistedPlan.steps,
-      updatedAt:
-        snapshotPlan.updatedAt > persistedPlan.updatedAt
-          ? snapshotPlan.updatedAt
-          : persistedPlan.updatedAt,
-    };
-  }
-
-  const hasActivePlanningSnapshot =
-    Boolean(snapshot?.activeTurnId) || snapshot?.activity?.title === 'Planning';
-  return hasActivePlanningSnapshot ? snapshotPlan : persistedPlan;
-}
-
-function toPersistedActivePlanState(
-  plan: Chat['latestPlan'],
-  fallbackUpdatedAt: string | null | undefined
-): ActivePlanState | null {
-  if (!plan) {
-    return null;
-  }
-
-  return {
-    threadId: plan.threadId,
-    turnId: plan.turnId,
-    explanation: plan.explanation,
-    steps: plan.steps,
-    deltaText: '',
-    updatedAt: fallbackUpdatedAt ?? new Date(0).toISOString(),
-  };
-}
-
-function resolveUndismissedPlanImplementationPrompt(
-  prompt: PendingPlanImplementationPrompt | null | undefined,
-  dismissedTurnId: string | null | undefined
-): PendingPlanImplementationPrompt | null {
-  if (!prompt) {
-    return null;
-  }
-
-  return dismissedTurnId && dismissedTurnId === prompt.turnId ? null : prompt;
-}
-
-function resolvePersistedPlanImplementationPrompt(
-  chat: Chat | null | undefined,
-  dismissedTurnId: string | null | undefined
-): PendingPlanImplementationPrompt | null {
-  if (!chat?.latestTurnPlan) {
-    return null;
-  }
-
-  if (dismissedTurnId && dismissedTurnId === chat.latestTurnPlan.turnId) {
-    return null;
-  }
-
-  return isCompletedPlanTurnStatus(chat.latestTurnStatus)
-    ? {
-        threadId: chat.id,
-        turnId: chat.latestTurnPlan.turnId,
-      }
-    : null;
-}
-
-function normalizePlanTurnStatus(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  return normalized.length > 0 ? normalized : null;
-}
-
-function isCompletedPlanTurnStatus(value: string | null | undefined): boolean {
-  const normalized = normalizePlanTurnStatus(value);
-  return (
-    normalized === 'completed' ||
-    normalized === 'complete' ||
-    normalized === 'success' ||
-    normalized === 'succeeded'
-  );
-}
-
-function formatReasoningEffort(effort: ReasoningEffort): string {
-  if (effort === 'xhigh') {
-    return 'X-High';
-  }
-
-  if (effort === 'none') {
-    return 'None';
-  }
-
-  if (effort === 'minimal') {
-    return 'Minimal';
-  }
-
-  return effort.charAt(0).toUpperCase() + effort.slice(1);
-}
-
-function shouldAutoEnablePlanModeFromChat(chat: Chat): boolean {
-  if (chat.latestTurnPlan) {
-    return true;
-  }
-
-  const latestAssistantMessage = [...chat.messages]
-    .reverse()
-    .find((message) => message.role === 'assistant');
-  if (!latestAssistantMessage) {
-    return false;
-  }
-
-  const normalized = latestAssistantMessage.content.toLowerCase();
-  return (
-    normalized.includes('request_user_input is unavailable in default mode') ||
-    (normalized.includes('request_user_input') &&
-      normalized.includes('default mode') &&
-      normalized.includes('plan mode') &&
-      normalized.includes('unavailable'))
-  );
-}
-
-function parseSlashCommand(input: string): { name: string; args: string } | null {
-  const trimmed = input.trim();
-  if (!trimmed.startsWith('/')) {
-    return null;
-  }
-
-  if (trimmed === '/') {
-    return {
-      name: 'help',
-      args: '',
-    };
-  }
-
-  const match = trimmed.match(/^\/([a-zA-Z0-9_-]+)\s*(.*)$/);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    name: match[1].toLowerCase(),
-    args: match[2] ?? '',
-  };
-}
-
-function parseSlashQuery(input: string): string | null {
-  const trimmed = input.trimStart();
-  if (!trimmed.startsWith('/')) {
-    return null;
-  }
-
-  if (trimmed === '/') {
-    return '';
-  }
-
-  const afterSlash = trimmed.slice(1);
-  const token = afterSlash.split(/\s+/)[0] ?? '';
-  return token.toLowerCase();
-}
-
-function findSlashCommandDefinition(name: string): SlashCommandDefinition | null {
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-
-  return (
-    SLASH_COMMANDS.find((command) => {
-      if (command.name.toLowerCase() === normalized) {
-        return true;
-      }
-
-      return (
-        command.aliases?.some((alias) => alias.toLowerCase() === normalized) ?? false
-      );
-    }) ?? null
-  );
-}
-
-function filterSlashCommands(query: string): SlashCommandDefinition[] {
-  const normalized = query.trim().toLowerCase();
-  const dedupedCommands = dedupeSlashCommandsByName(SLASH_COMMANDS);
-  if (!normalized) {
-    return dedupedCommands;
-  }
-
-  return dedupedCommands.filter((command) => {
-    const byName = command.name.toLowerCase().includes(normalized);
-    const bySummary = command.summary.toLowerCase().includes(normalized);
-    const byAlias =
-      command.aliases?.some((alias) => alias.toLowerCase().includes(normalized)) ?? false;
-    return byName || bySummary || byAlias;
-  });
-}
-
-function dedupeSlashCommandsByName(
-  commands: SlashCommandDefinition[]
-): SlashCommandDefinition[] {
-  const seen = new Set<string>();
-  const result: SlashCommandDefinition[] = [];
-
-  for (const command of commands) {
-    const key = command.name.trim().toLowerCase();
-    if (!key || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    result.push(command);
-  }
-
-  return result;
-}
-
-function formatAgentThreadOptionTitle(
-  chat: ChatSummary,
-  rootThreadId: string | null,
-  ordinal: number | null
-): string {
-  const trimmedTitle = chat.title.trim();
-  if (rootThreadId && chat.id === rootThreadId) {
-    return trimmedTitle || 'Main thread';
-  }
-  const nickname = chat.agentNickname?.trim();
-  if (nickname) {
-    return nickname;
-  }
-  if (ordinal !== null) {
-    return `Sub-agent ${String(ordinal)}`;
-  }
-  return 'Sub-agent';
-}
-
-function iconForAgentThread(
-  chat: ChatSummary,
-  rootThreadId: string | null
-): ComponentProps<typeof Ionicons>['name'] {
-  if (rootThreadId && chat.id === rootThreadId) {
-    return 'chatbubble-ellipses-outline';
-  }
-
-  switch (chat.sourceKind) {
-    case 'subAgentReview':
-      return 'shield-checkmark-outline';
-    case 'subAgentCompact':
-      return 'layers-outline';
-    default:
-      return chat.status === 'running' ? 'sparkles-outline' : 'git-branch-outline';
-  }
-}
-
-function stripMarkdownInline(value: string): string {
-  return value
-    .replace(/(^|\n)\s{0,3}#{1,6}\s*/g, '$1')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/[_~]/g, '');
-}
-
-function toTickerSnippet(
-  value: string | null | undefined,
-  maxLength = 72
-): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const cleaned = value.replace(/\s+/g, ' ').trim();
-  if (!cleaned) {
-    return null;
-  }
-
-  if (cleaned.length <= maxLength) {
-    return cleaned;
-  }
-
-  return `${cleaned.slice(0, Math.max(1, maxLength - 1))}…`;
-}
-
-function mergeStreamingDelta(previous: string | null, delta: string): string {
-  if (!delta) {
-    return previous ?? '';
-  }
-
-  const prev = previous ?? '';
-  if (!prev) {
-    return delta;
-  }
-
-  if (delta === prev || prev.endsWith(delta)) {
-    return prev;
-  }
-
-  // Some transports send cumulative snapshots instead of token deltas.
-  if (delta.startsWith(prev)) {
-    return delta;
-  }
-
-  const maxOverlap = Math.min(prev.length, delta.length);
-  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-    if (prev.endsWith(delta.slice(0, overlap))) {
-      return prev + delta.slice(overlap);
-    }
-  }
-
-  return prev + delta;
-}
-
-function formatLiveReasoningMessage(text: string): string {
-  const normalized = text.trim();
-  if (!normalized) {
-    return '• Reasoning';
-  }
-
-  const lines = normalized
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0);
-  if (lines.length === 0) {
-    return '• Reasoning';
-  }
-
-  const [first, ...rest] = lines;
-  return ['• Reasoning', `  └ ${first}`, ...rest.map((line) => `    ${line}`)].join('\n');
-}
-
-function filterReasoningMessagesForEngine(
-  messages: ChatTranscriptMessage[],
-  engine: Chat['engine'] | undefined
-): ChatTranscriptMessage[] {
-  if (engine !== 'codex') {
-    return messages;
-  }
-
-  return messages.filter((message) => message.systemKind !== 'reasoning');
-}
-
-function describeStartedToolEvent(
-  item: Record<string, unknown> | null
-): { eventType: string; detail: string } | null {
-  const itemType = readString(item?.type);
-  if (itemType === 'commandExecution') {
-    const command = toTickerSnippet(readString(item?.command), 80) ?? 'Command';
-    return {
-      eventType: 'command.running',
-      detail: buildToolEventDetail(command, 'running'),
-    };
-  }
-
-  if (itemType === 'fileChange') {
-    return {
-      eventType: 'file_change.running',
-      detail: buildToolEventDetail('Applying file changes', 'running'),
-    };
-  }
-
-  if (itemType === 'mcpToolCall') {
-    const detail = [readString(item?.server), readString(item?.tool)]
-      .filter(Boolean)
-      .join(' / ') || 'Tool call';
-    return {
-      eventType: 'tool.running',
-      detail: buildToolEventDetail(detail, 'running'),
-    };
-  }
-
-  return null;
-}
-
-function describeCompletedToolEvent(
-  item: Record<string, unknown> | null
-): { eventType: string; detail: string } | null {
-  const itemType = readString(item?.type);
-  const rawStatus = readString(item?.status);
-  const status: 'complete' | 'error' =
-    rawStatus === 'failed' || rawStatus === 'error' ? 'error' : 'complete';
-
-  if (itemType === 'commandExecution') {
-    const command = toTickerSnippet(readString(item?.command), 80) ?? 'Command';
-    return {
-      eventType: 'command.completed',
-      detail: buildToolEventDetail(command, status),
-    };
-  }
-
-  if (itemType === 'fileChange') {
-    const changedPaths = readCompletedFileChangePaths(item);
-    const changedFileLabel =
-      changedPaths.length === 0
-        ? 'File changes'
-        : changedPaths.length === 1
-          ? `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 48) ?? 'file'}`
-          : `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
-    return {
-      eventType: 'file_change.completed',
-      detail: buildToolEventDetail(changedFileLabel, status),
-    };
-  }
-
-  if (itemType === 'mcpToolCall') {
-    const detail = [readString(item?.server), readString(item?.tool)]
-      .filter(Boolean)
-      .join(' / ') || 'Tool call';
-    return {
-      eventType: 'tool.completed',
-      detail: buildToolEventDetail(detail, status),
-    };
-  }
-
-  return null;
-}
-
-function describeWebSearchToolEvent(
-  msg: Record<string, unknown> | null
-): { eventType: string; detail: string } | null {
-  const query = toTickerSnippet(readString(msg?.query), 80);
-  return {
-    eventType: 'web_search.running',
-    detail: buildToolEventDetail(query ? `Web search: ${query}` : 'Web search', 'running'),
-  };
-}
-
-function buildToolEventDetail(
-  label: string,
-  status: 'running' | 'complete' | 'error'
-): string {
-  return `${label} | ${status}`;
-}
-
-function readCompletedFileChangePaths(item: Record<string, unknown> | null): string[] {
-  const rawChanges = Array.isArray(item?.changes) ? item.changes : [];
-  const seen = new Set<string>();
-  const paths: string[] = [];
-
-  for (const change of rawChanges) {
-    const changeRecord = toRecord(change);
-    const path =
-      readString(change)?.trim() ??
-      readString(changeRecord?.path)?.trim() ??
-      readString(changeRecord?.filePath)?.trim() ??
-      readString(changeRecord?.file_path)?.trim();
-    if (!path) {
-      continue;
-    }
-    const normalized = path.replace(/\\/g, '/');
-    if (seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    paths.push(normalized);
-  }
-
-  return paths;
-}
-
-function toFileChangeTargetLabel(path: string): string {
-  const normalized = path.trim().replace(/\\/g, '/');
-  if (!normalized) {
-    return 'file';
-  }
-
-  const basename = normalized.split('/').filter(Boolean).pop();
-  return basename && basename.length > 0 ? basename : normalized;
-}
-
-function appendRunEventHistory(
-  previous: RunEvent[],
-  threadId: string,
-  eventType: string,
-  detail: string
-): RunEvent[] {
-  const last = previous[previous.length - 1];
-  if (last && last.eventType === eventType && last.detail === detail) {
-    return previous;
-  }
-
-  const next: RunEvent = {
-    id: `re-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    threadId,
-    eventType,
-    at: new Date().toISOString(),
-    detail,
-  };
-
-  return [...previous, next].slice(-MAX_ACTIVE_COMMANDS);
-}
-
-function normalizeCodexEventType(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  return normalized.length > 0 ? normalized : null;
-}
-
-function isCodexRunHeartbeatEvent(codexEventType: string): boolean {
-  return CODEX_RUN_HEARTBEAT_EVENT_TYPES.has(codexEventType);
-}
-
-function normalizeExternalStatusHint(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  return normalized.length > 0 ? normalized : null;
-}
-
-function extractNotificationThreadId(
-  params: Record<string, unknown> | null,
-  msgArg?: Record<string, unknown> | null
-): string | null {
-  if (!params && !msgArg) {
-    return null;
-  }
-
-  const msg = msgArg ?? toRecord(params?.msg);
-  const threadRecord =
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
-  const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn
-  );
-  const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn
-  );
-
-  return (
-    readString(msg?.thread_id) ??
-    readString(msg?.threadId) ??
-    readString(msg?.conversation_id) ??
-    readString(msg?.conversationId) ??
-    readString(params?.thread_id) ??
-    readString(params?.threadId) ??
-    readString(params?.conversation_id) ??
-    readString(params?.conversationId) ??
-    readString(threadRecord?.id) ??
-    readString(threadRecord?.thread_id) ??
-    readString(threadRecord?.threadId) ??
-    readString(threadRecord?.conversation_id) ??
-    readString(threadRecord?.conversationId) ??
-    readString(turnRecord?.thread_id) ??
-    readString(turnRecord?.threadId) ??
-    readString(sourceRecord?.thread_id) ??
-    readString(sourceRecord?.threadId) ??
-    readString(sourceRecord?.conversation_id) ??
-    readString(sourceRecord?.conversationId) ??
-    readString(sourceRecord?.parent_thread_id) ??
-    readString(sourceRecord?.parentThreadId) ??
-    readString(subagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(subagentThreadSpawnRecord?.parentThreadId) ??
-    readString(threadSourceRecord?.parent_thread_id) ??
-    readString(threadSourceRecord?.parentThreadId) ??
-    readString(threadSubagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(threadSubagentThreadSpawnRecord?.parentThreadId) ??
-    null
-  );
-}
-
-function extractNotificationParentThreadId(
-  params: Record<string, unknown> | null,
-  msgArg?: Record<string, unknown> | null
-): string | null {
-  if (!params && !msgArg) {
-    return null;
-  }
-
-  const msg = msgArg ?? toRecord(params?.msg);
-  const threadRecord =
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
-  const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn
-  );
-  const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn
-  );
-
-  return (
-    readString(sourceRecord?.parent_thread_id) ??
-    readString(sourceRecord?.parentThreadId) ??
-    readString(subagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(subagentThreadSpawnRecord?.parentThreadId) ??
-    readString(threadSourceRecord?.parent_thread_id) ??
-    readString(threadSourceRecord?.parentThreadId) ??
-    readString(threadSubagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(threadSubagentThreadSpawnRecord?.parentThreadId) ??
-    null
-  );
-}
-
-function extractExternalStatusHint(
-  params: Record<string, unknown> | null
-): string | null {
-  if (!params) {
-    return null;
-  }
-
-  const directCandidates: unknown[] = [
-    params.status,
-    params.threadStatus,
-    params.thread_status,
-    params.state,
-    params.phase,
-  ];
-  for (const candidate of directCandidates) {
-    const direct = normalizeExternalStatusHint(readString(candidate));
-    if (direct) {
-      return direct;
-    }
-
-    const candidateRecord = toRecord(candidate);
-    const typed = normalizeExternalStatusHint(
-      readString(candidateRecord?.type) ??
-        readString(candidateRecord?.status) ??
-        readString(candidateRecord?.state) ??
-        readString(candidateRecord?.phase)
-    );
-    if (typed) {
-      return typed;
-    }
-  }
-
-  const threadRecord =
-    toRecord(params.thread) ?? toRecord(params.threadState) ?? toRecord(params.thread_state);
-  if (!threadRecord) {
-    return null;
-  }
-
-  const nestedThreadStatus = normalizeExternalStatusHint(
-    readString(threadRecord.status) ??
-      readString(toRecord(threadRecord.status)?.type) ??
-      readString(threadRecord.state) ??
-      readString(threadRecord.phase) ??
-      readString(toRecord(threadRecord.lifecycle)?.status)
-  );
-  return nestedThreadStatus;
-}
-
-function isChatSummaryLikelyRunning(chat: ChatSummary): boolean {
-  return chat.status === 'running';
-}
-
-function isChatLikelyRunning(chat: Chat): boolean {
-  if (chat.status === 'running') {
-    return true;
-  }
-
-  // Trust definitive server statuses — don't second-guess them with heuristics.
-  if (chat.status === 'error' || chat.status === 'complete' || chat.status === 'idle') {
-    return false;
-  }
-
-  const lastMessage = chat.messages[chat.messages.length - 1];
-  if (!lastMessage || lastMessage.role !== 'user') {
-    return false;
-  }
-
-  const updatedAtMs = Date.parse(chat.updatedAt);
-  if (!Number.isFinite(updatedAtMs)) {
-    return false;
-  }
-
-  return Date.now() - updatedAtMs < LIKELY_RUNNING_RECENT_UPDATE_MS;
-}
-
-function hasRecentUnansweredUserTurn(chat: Chat): boolean {
-  let lastUserIndex = -1;
-  for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
-    if (chat.messages[index].role === 'user') {
-      lastUserIndex = index;
-      break;
-    }
-  }
-
-  if (lastUserIndex < 0) {
-    return false;
-  }
-
-  for (let index = lastUserIndex + 1; index < chat.messages.length; index += 1) {
-    if (chat.messages[index].role === 'assistant') {
-      return false;
-    }
-  }
-
-  const lastUser = chat.messages[lastUserIndex];
-  const userCreatedAtMs = Date.parse(lastUser.createdAt);
-  if (!Number.isFinite(userCreatedAtMs)) {
-    return false;
-  }
-
-  return Date.now() - userCreatedAtMs < UNANSWERED_USER_RUNNING_TTL_MS;
-}
-
-function didAssistantMessageProgress(previous: Chat | null, next: Chat): boolean {
-  if (!previous || previous.id !== next.id) {
-    return false;
-  }
-
-  const previousLatestAssistant = latestAssistantMessage(previous.messages);
-  const nextLatestAssistant = latestAssistantMessage(next.messages);
-
-  if (!nextLatestAssistant) {
-    return false;
-  }
-
-  if (!previousLatestAssistant) {
-    return nextLatestAssistant.content.trim().length > 0;
-  }
-
-  if (nextLatestAssistant.id === previousLatestAssistant.id) {
-    return nextLatestAssistant.content.length > previousLatestAssistant.content.length;
-  }
-
-  return (
-    next.messages.length > previous.messages.length &&
-    nextLatestAssistant.content.trim().length > 0
-  );
-}
-
-function latestAssistantMessage(messages: ChatTranscriptMessage[]): ChatTranscriptMessage | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role === 'assistant') {
-      return message;
-    }
-  }
-  return null;
-}
-
-function extractFirstBoldSnippet(
-  value: string | null | undefined,
-  maxLength = 56
-): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const match = value.match(/\*\*([^*]+)\*\*/);
-  if (!match) {
-    return null;
-  }
-
-  return toTickerSnippet(match[1], maxLength);
-}
-
-function toReasoningActivityDetail(
-  value: string | null | undefined,
-  heading: string | null | undefined,
-  maxLength = 64
-): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  let cleaned = stripMarkdownInline(value).replace(/\s+/g, ' ').trim();
-  if (!cleaned) {
-    return undefined;
-  }
-
-  if (heading) {
-    const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    cleaned = cleaned
-      .replace(new RegExp(`^${escapedHeading}(?:\\s*[:\\-.–—]\\s*|\\s+)`, 'i'), '')
-      .trim();
-    if (!cleaned || cleaned.toLowerCase() === heading.toLowerCase()) {
-      return undefined;
-    }
-  }
-
-  return toTickerSnippet(cleaned, maxLength) ?? undefined;
-}
-
-function toPendingApproval(value: unknown): PendingApproval | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const id = readString(record.id);
-  const kind = readString(record.kind);
-  const threadId = readString(record.threadId);
-  const turnId = readString(record.turnId);
-  const itemId = readString(record.itemId);
-  const requestedAt = readString(record.requestedAt);
-
-  if (
-    !id ||
-    !kind ||
-    !threadId ||
-    !turnId ||
-    !itemId ||
-    !requestedAt ||
-    (kind !== 'commandExecution' && kind !== 'fileChange')
-  ) {
-    return null;
-  }
-
-  return {
-    id,
-    kind,
-    threadId,
-    turnId,
-    itemId,
-    requestedAt,
-    reason: readString(record.reason) ?? undefined,
-    command: readString(record.command) ?? undefined,
-    cwd: readString(record.cwd) ?? undefined,
-    grantRoot: readString(record.grantRoot) ?? undefined,
-    proposedExecpolicyAmendment: readStringArray(record.proposedExecpolicyAmendment) ?? undefined,
-  };
-}
-
-// ── Styles ─────────────────────────────────────────────────────────
-
-const createWorkflowMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
-  body: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-  },
-  paragraph: {
-    ...theme.typography.body,
-    color: theme.colors.textSecondary,
-    marginTop: 0,
-    marginBottom: theme.spacing.xs,
-  },
-  heading1: {
-    ...theme.typography.headline,
-    color: theme.colors.textPrimary,
-    fontSize: 18,
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  heading2: {
-    ...theme.typography.headline,
-    color: theme.colors.textPrimary,
-    fontSize: 16,
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  heading3: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs / 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  heading4: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs / 2,
-  },
-  heading5: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs / 2,
-  },
-  heading6: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs / 2,
-  },
-  bullet_list: {
-    marginTop: 0,
-    marginBottom: theme.spacing.xs,
-  },
-  ordered_list: {
-    marginTop: 0,
-    marginBottom: theme.spacing.xs,
-  },
-  list_item: {
-    marginTop: 0,
-    marginBottom: theme.spacing.xs / 2,
-  },
-  strong: {
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  em: {
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  code_inline: {
-    ...theme.typography.mono,
-    backgroundColor: theme.colors.inlineCodeBg,
-    color: theme.colors.inlineCodeText,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.inlineCodeBorder,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  code_block: {
-    ...theme.typography.mono,
-    backgroundColor: theme.colors.bgInput,
-    color: theme.colors.textPrimary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  fence: {
-    ...theme.typography.mono,
-    backgroundColor: theme.colors.bgInput,
-    color: theme.colors.textPrimary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  blockquote: {
-    borderLeftWidth: 2,
-    borderLeftColor: theme.colors.borderHighlight,
-    paddingLeft: theme.spacing.sm,
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  link: {
-    color: theme.colors.accent,
-    textDecorationLine: 'underline',
-  },
-});
-
-const createStyles = (theme: AppTheme) => {
-  const agentPanelShadow = theme.isDark
-    ? '0 12px 30px rgba(0, 0, 0, 0.22)'
-    : '0 12px 24px rgba(15, 23, 42, 0.12)';
-
-  return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.bgMain,
-  },
-
-  bodyContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  keyboardAvoiding: {
-    flex: 1,
-  },
-  composerContainer: {
-    backgroundColor: theme.colors.bgMain,
-  },
-  composerContainerOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 4,
-  },
-  composerContainerResting: {
-    marginBottom: 0,
-  },
-  queuedMessageDock: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.xs,
-    paddingBottom: theme.spacing.xs / 2,
-  },
-  activityDock: {
-    backgroundColor: theme.colors.bgMain,
-    paddingTop: theme.spacing.xs,
-    paddingBottom: theme.spacing.xs / 2,
-    zIndex: 3,
-  },
-  sessionMetaRow: {
-    backgroundColor: theme.colors.bgMain,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
-    paddingVertical: theme.spacing.xs + 2,
-  },
-  sessionMetaRowContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs + 2,
-    paddingHorizontal: theme.spacing.lg,
-  },
-  topCardsRow: {
-    backgroundColor: theme.colors.bgMain,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.sm,
-    gap: theme.spacing.sm,
-    zIndex: 2,
-  },
-  agentPanelWrap: {
-    backgroundColor: theme.colors.bgMain,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.sm,
-  },
-  agentPanelCard: {
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgElevated,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    gap: theme.spacing.sm,
-    boxShadow: agentPanelShadow,
-  },
-  agentPanelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing.sm,
-  },
-  agentPanelHeaderPressable: {
-    borderRadius: theme.radius.md,
-  },
-  agentPanelHeaderPressed: {
-    opacity: 0.84,
-  },
-  agentPanelHeaderCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  agentPanelEyebrow: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  agentPanelSummary: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  agentPanelList: {
-    gap: theme.spacing.sm,
-  },
-  agentPanelScroll: {
-    flexGrow: 0,
-  },
-  agentPanelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    borderRadius: theme.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.sm + 2,
-    paddingVertical: theme.spacing.sm + 2,
-  },
-  agentPanelRowSelected: {
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
-  },
-  agentPanelRowPressed: {
-    opacity: 0.84,
-  },
-  agentPanelAccent: {
-    width: 4,
-    alignSelf: 'stretch',
-    borderRadius: 999,
-    flexShrink: 0,
-  },
-  agentPanelCopy: {
-    flex: 1,
-    gap: 2,
-    minWidth: 0,
-  },
-  agentPanelTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-  },
-  agentPanelTitle: {
-    ...theme.typography.body,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700',
-    flex: 1,
-  },
-  agentPanelSelectedLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '600',
-  },
-  agentPanelDescription: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  agentPanelStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 5,
-    maxWidth: '42%',
-    flexShrink: 0,
-  },
-  agentPanelStatusText: {
-    ...theme.typography.caption,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '700',
-  },
-  contextChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.xs + 6,
-    paddingVertical: 4,
-    flexShrink: 0,
-  },
-  contextChipIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    flexShrink: 0,
-  },
-  contextChipText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  modelChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.xs + 6,
-    paddingVertical: 4,
-    flexShrink: 0,
-  },
-  modeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.xs + 6,
-    paddingVertical: 4,
-    flexShrink: 0,
-  },
-  fastChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.xs + 6,
-    paddingVertical: 4,
-    flexShrink: 0,
-  },
-  fastChipEnabled: {
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.inlineCodeBg,
-  },
-  modelChipPressed: {
-    opacity: 0.86,
-  },
-  sessionMetaChipDisabled: {
-    opacity: 0.5,
-  },
-  modelChipText: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  fastChipTextEnabled: {
-    color: theme.colors.textPrimary,
-  },
-  planCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    borderRadius: 12,
-    backgroundColor: theme.colors.bgItem,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
-  },
-  planOverlayCard: {
-    marginBottom: 0,
-    boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.16)',
-  },
-  queuedMessageCard: {
-    marginBottom: 0,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: 10,
-  },
-  queuedMessageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.xs / 2,
-  },
-  queuedMessageHeaderText: {
-    flex: 1,
-    gap: 2,
-  },
-  queuedMessageActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-  },
-  queuedMessageSummary: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  queuedMessageBody: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    lineHeight: 18,
-  },
-  queuedMessageHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
-  },
-  workflowSection: {
-    marginTop: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  workflowSectionEyebrow: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  workflowScrollViewport: {
-    marginTop: theme.spacing.xs,
-  },
-  workflowScrollContent: {
-    paddingBottom: theme.spacing.xs,
-  },
-  workflowSummaryText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    lineHeight: 18,
-  },
-  workflowMetaText: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  queuedMessageActionButton: {
-    flexShrink: 0,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.inlineCodeBg,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 5,
-  },
-  queuedMessageActionButtonDestructive: {
-    borderColor: theme.colors.error,
-    backgroundColor: theme.colors.errorBg,
-  },
-  queuedMessageActionButtonDisabled: {
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgMain,
-  },
-  queuedMessageActionButtonPressed: {
-    opacity: 0.88,
-  },
-  queuedMessageActionLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  queuedMessageActionLabelDestructive: {
-    color: theme.colors.error,
-  },
-  queuedMessageActionLabelDisabled: {
-    color: theme.colors.textMuted,
-  },
-  planCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
-  },
-  planCardHeaderPressable: {
-    marginBottom: 0,
-  },
-  planCardHeaderText: {
-    flex: 1,
-    gap: 2,
-  },
-  planCardTitle: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  planCardSummary: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  planExplanationText: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic',
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
-  },
-  planStepsList: {
-    gap: theme.spacing.xs,
-  },
-  planStepRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.spacing.sm,
-  },
-  planStepMarkdownWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  planStepStatus: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: 1,
-  },
-  planStepStatusCompleted: {
-    color: theme.colors.textMuted,
-  },
-  planStepStatusInProgress: {
-    color: theme.colors.accent,
-    fontWeight: '700',
-  },
-  planStepStatusPending: {
-    color: theme.colors.textMuted,
-  },
-  planStepText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    flex: 1,
-  },
-  planStepTextCompleted: {
-    color: theme.colors.textMuted,
-    textDecorationLine: 'line-through',
-  },
-  planStepTextInProgress: {
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  planStepTextPending: {
-    color: theme.colors.textPrimary,
-  },
-  planDeltaText: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
-  },
-  renameModalBackdrop: {
-    flex: 1,
-    backgroundColor: theme.colors.overlayBackdrop,
-    paddingHorizontal: theme.spacing.lg,
-    justifyContent: 'center',
-  },
-  renameModalKeyboardAvoider: {
-    flex: 1,
-  },
-  renameModalKeyboardContent: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  renameModalKeyboardContentBottom: {
-    justifyContent: 'flex-end',
-  },
-  workspaceModalLoading: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  inlineMentionStatus: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.xs,
-  },
-  slashSuggestions: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.xs,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    overflow: 'hidden',
-  },
-  slashSuggestionsContent: {
-    paddingVertical: 0,
-  },
-  slashSuggestionItem: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
-  },
-  slashSuggestionItemLast: {
-    borderBottomWidth: 0,
-  },
-  slashSuggestionItemPressed: {
-    backgroundColor: theme.colors.bgInput,
-  },
-  slashSuggestionTitle: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  slashSuggestionSummary: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-  },
-  renameModalCard: {
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-    maxHeight: '82%',
-  },
-  renameModalTitle: {
-    ...theme.typography.headline,
-    color: theme.colors.textPrimary,
-  },
-  attachmentModalHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  attachmentSuggestionsList: {
-    maxHeight: 170,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    borderRadius: 10,
-    backgroundColor: theme.colors.bgMain,
-  },
-  attachmentSuggestionsListContent: {
-    paddingVertical: 0,
-  },
-  attachmentSuggestionItem: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
-  },
-  attachmentSuggestionItemLast: {
-    borderBottomWidth: 0,
-  },
-  attachmentSuggestionItemPressed: {
-    backgroundColor: theme.colors.bgInput,
-  },
-  attachmentSuggestionText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-  },
-  renameModalInput: {
-    color: theme.colors.textPrimary,
-    backgroundColor: theme.colors.bgInput,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    fontSize: 15,
-  },
-  gitCheckoutHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    lineHeight: 18,
-  },
-  gitCheckoutPathButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
-    backgroundColor: theme.colors.bgMain,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-  },
-  gitCheckoutPathButtonPressed: {
-    opacity: 0.85,
-  },
-  gitCheckoutPathCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  gitCheckoutPathLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  gitCheckoutPathValue: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  gitCheckoutSummary: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  gitCheckoutErrorText: {
-    ...theme.typography.caption,
-    color: theme.colors.error,
-  },
-  attachmentListColumn: {
-    gap: theme.spacing.xs,
-    maxHeight: 180,
-  },
-  attachmentListRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    borderRadius: 8,
-    backgroundColor: theme.colors.bgMain,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
-  },
-  attachmentListPath: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    flex: 1,
-  },
-  attachmentRemoveButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-  },
-  attachmentRemoveButtonPressed: {
-    opacity: 0.8,
-  },
-  renameModalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: theme.spacing.sm,
-  },
-  renameModalButton: {
-    borderRadius: 10,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    borderWidth: 1,
-  },
-  renameModalButtonSecondary: {
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgMain,
-  },
-  renameModalButtonSecondaryText: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-  },
-  renameModalButtonPrimary: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
-  },
-  renameModalButtonPrimaryPressed: {
-    backgroundColor: theme.colors.accentPressed,
-    borderColor: theme.colors.accentPressed,
-  },
-  renameModalButtonDisabled: {
-    opacity: 0.45,
-  },
-  renameModalButtonPressed: {
-    opacity: 0.8,
-  },
-  renameModalButtonPrimaryText: {
-    ...theme.typography.body,
-    color: theme.colors.accentText,
-    fontWeight: '600',
-  },
-  userInputModalBackdrop: {
-    flex: 1,
-    backgroundColor: theme.colors.overlayBackdrop,
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.lg,
-  },
-  userInputModalCard: {
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.borderHighlight,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-    maxHeight: '80%',
-  },
-  planPromptModalCard: {
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.borderHighlight,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-    maxHeight: '80%',
-  },
-  userInputModalTitle: {
-    ...theme.typography.headline,
-    color: theme.colors.textPrimary,
-  },
-  planPromptOptionsColumn: {
-    gap: theme.spacing.sm,
-  },
-  planPromptOptionButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgMain,
-    borderRadius: 10,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    gap: theme.spacing.xs,
-  },
-  planPromptOptionButtonPressed: {
-    opacity: 0.88,
-  },
-  planPromptOptionButtonDisabled: {
-    opacity: 0.45,
-  },
-  planPromptOptionTitle: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  planPromptOptionTitleDisabled: {
-    color: theme.colors.textMuted,
-  },
-  planPromptOptionDescription: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  planPromptOptionDescriptionDisabled: {
-    color: theme.colors.textMuted,
-  },
-  userInputQuestionsList: {
-    maxHeight: 380,
-  },
-  userInputQuestionsListContent: {
-    gap: theme.spacing.md,
-  },
-  userInputQuestionCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    borderRadius: 10,
-    backgroundColor: theme.colors.bgMain,
-    padding: theme.spacing.sm,
-    gap: theme.spacing.xs,
-  },
-  userInputQuestionHeader: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  userInputQuestionText: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  userInputOptionsColumn: {
-    gap: theme.spacing.xs,
-    marginTop: theme.spacing.xs,
-  },
-  userInputOptionButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 10,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-    gap: 2,
-  },
-  userInputOptionButtonSelected: {
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
-  },
-  userInputOptionButtonPressed: {
-    opacity: 0.85,
-  },
-  userInputOptionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  userInputOptionIndex: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '700',
-    minWidth: 18,
-  },
-  userInputOptionLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    flex: 1,
-    fontWeight: '600',
-  },
-  userInputOptionDescription: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  userInputAnswerInput: {
-    color: theme.colors.textPrimary,
-    backgroundColor: theme.colors.bgInput,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 8,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-    minHeight: 42,
-    textAlignVertical: 'top',
-  },
-  userInputAnswerInputSecret: {
-    textAlignVertical: 'center',
-  },
-  userInputErrorText: {
-    ...theme.typography.caption,
-    color: theme.colors.error,
-  },
-  userInputSubmitButton: {
-    borderWidth: 1,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
-    borderRadius: 10,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-  },
-  userInputSubmitButtonPressed: {
-    opacity: 0.88,
-  },
-  userInputSubmitButtonDisabled: {
-    opacity: 0.45,
-  },
-  userInputSubmitButtonText: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-
-  // Compose
-  composeScroll: {
-    flex: 1,
-  },
-  composeContainer: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.xl,
-    paddingBottom: theme.spacing.xxl * 2,
-  },
-  composeContainerKeyboardOpen: {
-    justifyContent: 'flex-start',
-    paddingTop: theme.spacing.xl,
-    paddingBottom: theme.spacing.xl,
-  },
-  composeIcon: {
-    marginBottom: theme.spacing.lg,
-  },
-  composeTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xl,
-  },
-  workspaceSelectBtn: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    marginBottom: theme.spacing.xl * 2,
-  },
-  workspacePathSelectBtn: {
-    alignItems: 'flex-start',
-    paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.md,
-  },
-  workspaceSelectBtnPressed: {
-    opacity: 0.85,
-  },
-  workspaceSelectLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    flex: 1,
-  },
-  workspacePathSelectLabel: {
-    flexShrink: 1,
-    lineHeight: 18,
-  },
-  suggestions: {
-    flexDirection: 'row',
-    gap: theme.spacing.md,
-    width: '100%',
-  },
-  suggestionCard: {
-    flex: 1,
-    backgroundColor: theme.colors.bgItem,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 12,
-    padding: theme.spacing.md,
-  },
-  suggestionCardPressed: {
-    backgroundColor: theme.colors.bgInput,
-  },
-  suggestionText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    lineHeight: 18,
-  },
-
-  // Chat
-  messageListShell: {
-    flex: 1,
-  },
-  messageList: {
-    flex: 1,
-  },
-  jumpToLatestButton: {
-    position: 'absolute',
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgElevated,
-    borderRadius: theme.radius.full,
-    width: 34,
-    height: 34,
-    boxShadow: theme.isDark
-      ? '0 12px 24px rgba(0, 0, 0, 0.28)'
-      : '0 10px 22px rgba(15, 31, 54, 0.12)',
-  },
-  jumpToLatestButtonPressed: {
-    opacity: 0.84,
-  },
-  messageListContent: {
-    flexGrow: 1,
-    padding: theme.spacing.lg,
-    paddingTop: theme.spacing.lg,
-    paddingBottom: theme.spacing.xl,
-    gap: theme.spacing.xl,
-  },
-  chatMessageBlock: {
-    gap: theme.spacing.sm,
-  },
-  messagePaginationWrap: {
-    alignItems: 'flex-start',
-    gap: theme.spacing.xs,
-  },
-  messagePaginationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 999,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-  },
-  messagePaginationButtonPressed: {
-    backgroundColor: theme.colors.bgInput,
-  },
-  messagePaginationButtonText: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  messagePaginationMeta: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginLeft: theme.spacing.xs,
-  },
-  inlineChoiceOptions: {
-    marginLeft: theme.spacing.sm,
-    gap: theme.spacing.xs,
-  },
-  inlineChoiceOptionButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bgItem,
-    borderRadius: 10,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-    gap: 2,
-  },
-  inlineChoiceOptionButtonPressed: {
-    backgroundColor: theme.colors.bgInput,
-    borderColor: theme.colors.borderHighlight,
-  },
-  inlineChoiceOptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  inlineChoiceOptionIndex: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '700',
-    minWidth: 18,
-  },
-  inlineChoiceOptionLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    flex: 1,
-  },
-  inlineChoiceOptionDescription: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  inlineChoiceHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-    marginLeft: theme.spacing.xs,
-  },
-  chatLoadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.xl,
-  },
-  chatLoadingText: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-
-  // Streaming thinking text
-  streamingText: {
-    ...theme.typography.body,
-    fontStyle: 'italic',
-    color: theme.colors.textMuted,
-    lineHeight: 20,
-  },
-
-  // Error
-  bridgeRecoveryBanner: {
-    marginHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.sm,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.warningBg,
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  bridgeRecoveryBannerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.spacing.sm,
-  },
-  bridgeRecoveryBannerIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.bgItem,
-  },
-  bridgeRecoveryBannerCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  bridgeRecoveryBannerTitle: {
-    ...theme.typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  bridgeRecoveryBannerBody: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    lineHeight: 17,
-  },
-  bridgeRecoveryBannerButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-  },
-  bridgeRecoveryBannerButtonPressed: {
-    backgroundColor: theme.colors.accentPressed,
-    borderColor: theme.colors.accentPressed,
-  },
-  bridgeRecoveryBannerButtonText: {
-    ...theme.typography.caption,
-    color: theme.colors.accentText,
-    fontWeight: '700',
-  },
-  errorText: {
-    ...theme.typography.caption,
-    color: theme.colors.error,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.xs,
-  },
-});
-};

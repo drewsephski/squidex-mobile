@@ -83,6 +83,18 @@ describe('browserPreview', () => {
     );
   });
 
+  it('uses an explicit preview base URL', () => {
+    expect(
+      buildBrowserPreviewBootstrapUrl(
+        'https://bridge.example.com',
+        8788,
+        '/app?sid=preview&st=token',
+        { preset: 'mobile' },
+        'https://preview.example.com'
+      )
+    ).toBe('https://preview.example.com/app?sid=preview&st=token&vp=mobile');
+  });
+
   it('updates an existing preview URL with a different viewport preset', () => {
     expect(
       applyBrowserPreviewViewportPreset(

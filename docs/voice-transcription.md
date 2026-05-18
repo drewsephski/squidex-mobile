@@ -6,8 +6,8 @@ Voice-to-text input for the mobile composer. Tap the mic button to record, tap a
 
 ```
 Phone (expo-audio)        Rust Bridge              OpenAI
-  record 16kHz mono       --> base64 over WebSocket --> POST /v1/audio/transcriptions
-  (iOS WAV, Android M4A)
+  record AAC mono         --> base64 over WebSocket --> POST /v1/audio/transcriptions
+  (iOS/Android M4A)
   insert text in composer <-- { text: "..." }    <-- gpt-4o-transcribe response
 ```
 
@@ -19,7 +19,10 @@ The bridge resolves transcription credentials in order:
 
 1. `OPENAI_API_KEY` env var → `https://api.openai.com/v1/audio/transcriptions` (model: `gpt-4o-transcribe`)
 2. `BRIDGE_CHATGPT_ACCESS_TOKEN` env var → `https://chatgpt.com/backend-api/transcribe` (no model param)
-3. `~/.codex/auth.json` fallback:
+3. Legacy ChatGPT auth tokens previously handed to Codex from the mobile app:
+   - cached in bridge memory
+   - persisted in `~/.clawdex/chatgpt-auth.json`
+4. `~/.codex/auth.json` fallback:
    - `OPENAI_API_KEY` field present → same as path 1
    - `auth_mode: "chatgpt"` with `tokens.access_token` → same as path 2
 
@@ -45,10 +48,13 @@ The bridge resolves transcription credentials in order:
 
 ## Recording Config
 
-- Sample rate: 16,000 Hz
+- Sample rate:
+  - iOS: 44,100 Hz
+  - Android: 16,000 Hz
 - Channels: 1 (mono)
+- Bitrate: 64kbps
 - Format:
-  - iOS: LINEARPCM 16-bit (`audio/wav`)
+  - iOS: MPEG-4 AAC (`audio/mp4`, `.m4a`)
   - Android: MPEG-4 AAC (`audio/mp4`, `.m4a`)
 - Minimum duration:
   - Mobile guard: 1 second

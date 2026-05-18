@@ -1,16 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BlurView } from 'expo-blur';
 import { CameraView, type BarcodeScanningResult, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -25,7 +29,11 @@ import {
 } from '../bridgeUrl';
 import { HostBridgeWsClient } from '../api/ws';
 import { BrandMark } from '../components/BrandMark';
+import { ChoiceAction } from '../components/ChoiceAction';
 import { useAppTheme, type AppTheme } from '../theme';
+import codexMarkPng from '../../assets/brand/engine-codex.png';
+import cursorMarkPng from '../../assets/brand/engine-cursor.png';
+import opencodeMarkPng from '../../assets/brand/engine-opencode.png';
 
 export type OnboardingMode = 'initial' | 'edit' | 'add' | 'reconnect';
 
@@ -50,59 +58,28 @@ type ConnectionCheck =
   | { kind: 'error'; message: string };
 type OnboardingStep = 'intro' | 'connect';
 type PairingPayload = { bridgeToken: string; bridgeUrl?: string };
-type IntroFeature = {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
-};
 
 const BRIDGE_SETUP_COMMANDS = 'npm install -g clawdex-mobile@latest\nclawdex init';
-const INTRO_FEATURES: IntroFeature[] = [
-  {
-    icon: 'pulse-outline',
-    title: 'Start and monitor runs',
-    description: 'Launch new Codex work from your phone and follow streaming updates as it runs.',
-  },
-  {
-    icon: 'chatbubble-ellipses-outline',
-    title: 'Resume threads',
-    description: 'Pick up existing chats and keep active work moving without going back to desktop.',
-  },
-  {
-    icon: 'shield-checkmark-outline',
-    title: 'Review approvals',
-    description: 'Handle clarification prompts and approve commands or file changes in-app.',
-  },
-  {
-    icon: 'folder-open-outline',
-    title: 'Browse workspaces',
-    description: 'Open recent folders or navigate server directories before starting work.',
-  },
-  {
-    icon: 'git-branch-outline',
-    title: 'Git actions',
-    description: 'Review diffs, commit, and push chat workspaces from the Git view.',
-  },
-  {
-    icon: 'mic-outline',
-    title: 'Voice, files, images',
-    description: 'Use push-to-talk and attach workspace files or phone images to prompts.',
-  },
-];
+const CLAWDEX_BRIDGE_SETUP_URL = 'https://getclawdex.com/bridge-setup/';
 const SETUP_STAGES = [
   {
-    title: 'Start bridge',
-    description: 'Run the CLI on your server and wait for the pairing QR.',
+    title: 'Start',
   },
   {
-    title: 'Pair bridge',
-    description: 'Scan QR or paste the bridge URL and token.',
+    title: 'Pair',
   },
   {
-    title: 'Verify auth',
-    description: 'Confirm health and authenticated RPC before continuing.',
+    title: 'Verify',
   },
 ] as const;
+const INTRO_ENGINE_MARKS = [
+  { label: 'Codex', logo: codexMarkPng },
+  { label: 'Cursor', logo: cursorMarkPng },
+  { label: 'OpenCode', logo: opencodeMarkPng },
+] as const;
+const INTRO_ENGINE_ROTATION_MS = 1450;
+const INTRO_ENGINE_FADE_MS = 120;
+const CONNECTION_CHECK_TIMEOUT_MS = 7_000;
 
 export function OnboardingScreen({
   mode = 'initial',
@@ -127,6 +104,10 @@ export function OnboardingScreen({
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [scannerLocked, setScannerLocked] = useState(false);
+  const [introEngineIndex, setIntroEngineIndex] = useState(0);
+  const introHeroMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
+  const introActionsMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
+  const introEngineMotion = useRef(new Animated.Value(1)).current;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const onboardingBackgroundGradient = theme.isDark
     ? (['#020304', '#05070C', '#0A0E16'] as const)
@@ -137,12 +118,6 @@ export function OnboardingScreen({
   const ambientSecondaryGradient = theme.isDark
     ? (['rgba(255, 255, 255, 0.10)', 'rgba(255, 255, 255, 0.02)', 'transparent'] as const)
     : (['rgba(255, 255, 255, 0.42)', 'rgba(255, 255, 255, 0.10)', 'transparent'] as const);
-  const introHeroGradient = theme.isDark
-    ? (['rgba(181, 189, 204, 0.22)', 'rgba(34, 39, 48, 0.75)', 'rgba(7, 9, 12, 0.96)'] as const)
-    : (['rgba(56, 79, 106, 0.16)', 'rgba(246, 249, 252, 0.96)', 'rgba(221, 231, 240, 0.98)'] as const);
-  const connectHeroGradient = theme.isDark
-    ? (['rgba(181, 189, 204, 0.18)', 'rgba(22, 25, 31, 0.82)', 'rgba(7, 9, 12, 0.98)'] as const)
-    : (['rgba(56, 79, 106, 0.14)', 'rgba(243, 247, 251, 0.96)', 'rgba(221, 231, 240, 0.99)'] as const);
 
   useEffect(() => {
     setOnboardingStep(mode === 'initial' ? 'intro' : 'connect');
@@ -157,6 +132,130 @@ export function OnboardingScreen({
   }, [initialBridgeToken]);
 
   const showIntroStep = mode === 'initial' && onboardingStep === 'intro';
+
+  useEffect(() => {
+    if (!showIntroStep) {
+      introHeroMotion.setValue(1);
+      introActionsMotion.setValue(1);
+      return;
+    }
+
+    introHeroMotion.setValue(0);
+    introActionsMotion.setValue(0);
+    Animated.sequence([
+      Animated.timing(introHeroMotion, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(introActionsMotion, {
+        toValue: 1,
+        duration: 340,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [introActionsMotion, introHeroMotion, showIntroStep]);
+
+  const introHeroAnimatedStyle = useMemo(
+    () => ({
+      opacity: introHeroMotion,
+      transform: [
+        {
+          translateY: introHeroMotion.interpolate({
+            inputRange: [0, 1],
+            outputRange: [26, 0],
+          }),
+        },
+        {
+          scale: introHeroMotion.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.98, 1],
+          }),
+        },
+      ],
+    }),
+    [introHeroMotion]
+  );
+  const introActionsAnimatedStyle = useMemo(
+    () => ({
+      opacity: introActionsMotion,
+      transform: [
+        {
+          translateY: introActionsMotion.interpolate({
+            inputRange: [0, 1],
+            outputRange: [18, 0],
+          }),
+        },
+      ],
+    }),
+    [introActionsMotion]
+  );
+  const introEngineAnimatedStyle = useMemo(
+    () => ({
+      opacity: introEngineMotion,
+      transform: [
+        {
+          translateY: introEngineMotion.interpolate({
+            inputRange: [0, 1],
+            outputRange: [6, 0],
+          }),
+        },
+      ],
+    }),
+    [introEngineMotion]
+  );
+
+  useEffect(() => {
+    if (!showIntroStep) {
+      introEngineMotion.stopAnimation();
+      introEngineMotion.setValue(1);
+      setIntroEngineIndex(0);
+      return;
+    }
+
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleNext = () => {
+      timer = setTimeout(() => {
+        Animated.timing(introEngineMotion, {
+          toValue: 0,
+          duration: INTRO_ENGINE_FADE_MS,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (!active || !finished) {
+            return;
+          }
+          setIntroEngineIndex((previous) => (previous + 1) % INTRO_ENGINE_MARKS.length);
+          Animated.timing(introEngineMotion, {
+            toValue: 1,
+            duration: INTRO_ENGINE_FADE_MS + 60,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }).start(({ finished: fadeInFinished }) => {
+            if (active && fadeInFinished) {
+              scheduleNext();
+            }
+          });
+        });
+      }, INTRO_ENGINE_ROTATION_MS);
+    };
+
+    introEngineMotion.setValue(1);
+    scheduleNext();
+
+    return () => {
+      active = false;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      introEngineMotion.stopAnimation();
+    };
+  }, [introEngineMotion, showIntroStep]);
+
+  const introEngineMark = INTRO_ENGINE_MARKS[introEngineIndex];
   const normalizedBridgeUrl = useMemo(
     () => normalizeBridgeUrlInput(urlInput),
     [urlInput]
@@ -171,25 +270,10 @@ export function OnboardingScreen({
       : null;
   }, [allowInsecureRemoteBridge, normalizedBridgeUrl]);
 
-  const modeTitle =
-    mode === 'edit'
-      ? 'Update Bridge Profile'
-      : mode === 'reconnect'
-        ? 'Reconnect Bridge'
-      : mode === 'add'
-        ? 'Add Bridge Profile'
-        : 'Pair Your Bridge';
-  const modeDescription =
-    mode === 'edit'
-      ? 'Update the saved server details for the current profile.'
-      : mode === 'reconnect'
-        ? 'The saved bridge is unavailable. Start the bridge on your computer, then verify or update the saved URL and token here.'
-      : mode === 'add'
-        ? 'Save another bridge so you can switch servers from Settings later.'
-        : 'Connect this phone to your private bridge and verify that it responds.';
-  const connectEyebrow = mode === 'reconnect' ? 'Bridge recovery' : 'Bridge pairing';
   const normalizedTokenPreview = tokenInput.trim();
   const showOnboardingDock = mode === 'initial';
+  const continueLabel =
+    mode === 'edit' ? 'Save URL' : mode === 'reconnect' ? 'Reconnect' : 'Continue';
   const currentSetupStage = useMemo(() => {
     if (showIntroStep) {
       return 1;
@@ -212,7 +296,7 @@ export function OnboardingScreen({
 
     const normalizedToken = tokenInput.trim();
     if (!normalizedToken) {
-      setFormError('Bridge token is required.');
+      setFormError('Connection token is required.');
       return null;
     }
 
@@ -227,57 +311,91 @@ export function OnboardingScreen({
 
   const runConnectionCheck = useCallback(
     async (normalized: string, token: string | null): Promise<boolean> => {
-    setCheckingConnection(true);
-    setConnectionCheck({ kind: 'idle' });
+      setCheckingConnection(true);
+      setConnectionCheck({ kind: 'idle' });
 
-    let probeClient: HostBridgeWsClient | null = null;
-    let healthCheckError: string | null = null;
-    try {
-      const headers: Record<string, string> | undefined = token
-        ? { Authorization: `Bearer ${token}` }
-        : undefined;
-      const healthUrl = toBridgeHealthUrl(normalized);
+      let probeClient: HostBridgeWsClient | null = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      const abortController =
+        typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutMessage = 'connection timed out after 7 seconds';
+      const disconnectProbe = () => {
+        const client: HostBridgeWsClient | null = probeClient;
+        client?.disconnect();
+      };
+
       try {
-        const response = await fetch(healthUrl, { method: 'GET', headers });
-        if (response.status !== 200) {
-          healthCheckError = `health returned ${response.status}`;
+        const probe = async (): Promise<string | null> => {
+          let healthCheckError: string | null = null;
+          const headers: Record<string, string> | undefined = token
+            ? { Authorization: `Bearer ${token}` }
+            : undefined;
+          const healthUrl = toBridgeHealthUrl(normalized);
+          try {
+            const response = await fetch(healthUrl, {
+              method: 'GET',
+              headers,
+              signal: abortController?.signal,
+            });
+            if (response.status !== 200) {
+              healthCheckError = `health returned ${response.status}`;
+            }
+          } catch (error) {
+            if (timedOut) {
+              throw new Error(timeoutMessage);
+            }
+            healthCheckError = (error as Error).message || 'network request failed';
+          }
+
+          if (timedOut) {
+            throw new Error(timeoutMessage);
+          }
+
+          probeClient = new HostBridgeWsClient(normalized, {
+            authToken: token,
+            allowQueryTokenAuth,
+            requestTimeoutMs: CONNECTION_CHECK_TIMEOUT_MS,
+          });
+          const rpcHealth = await probeClient.request<{ status?: string }>('bridge/health/read');
+          if (rpcHealth?.status !== 'ok') {
+            throw new Error('authenticated RPC probe returned unexpected response');
+          }
+          return healthCheckError;
+        };
+
+        const healthCheckError = await Promise.race([
+          probe(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+              timedOut = true;
+              abortController?.abort();
+              disconnectProbe();
+              reject(new Error(timeoutMessage));
+            }, CONNECTION_CHECK_TIMEOUT_MS);
+          }),
+        ]);
+
+        setConnectionCheck({
+          kind: 'success',
+          message: healthCheckError
+            ? 'Connected. Authenticated RPC verified; /health endpoint did not return 200.'
+            : 'Connected. URL and token both verified.',
+        });
+        return true;
+      } catch {
+        setConnectionCheck({
+          kind: 'error',
+          message: 'Connection error. Check the URL and token, then try again.',
+        });
+        return false;
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
         }
-      } catch (error) {
-        healthCheckError = (error as Error).message || 'network request failed';
+        disconnectProbe();
+        setCheckingConnection(false);
       }
-
-      probeClient = new HostBridgeWsClient(normalized, {
-        authToken: token,
-        allowQueryTokenAuth,
-        requestTimeoutMs: 10_000,
-      });
-      const rpcHealth = await probeClient.request<{ status?: string }>('bridge/health/read');
-      if (rpcHealth?.status !== 'ok') {
-        throw new Error('authenticated RPC probe returned unexpected response');
-      }
-
-      setConnectionCheck({
-        kind: 'success',
-        message: healthCheckError
-          ? 'Connected. Authenticated RPC verified; /health endpoint did not return 200.'
-          : 'Connected. URL and token both verified.',
-      });
-      return true;
-    } catch (error) {
-      const baseMessage = (error as Error).message || 'request failed';
-      const hint =
-        Platform.OS === 'android' && baseMessage.includes('Network request failed')
-          ? ' (If using Android emulator, use http://10.0.2.2:8787 for localhost bridge.)'
-          : '';
-      setConnectionCheck({
-        kind: 'error',
-        message: `Bridge verification failed: ${baseMessage}${hint}`,
-      });
-      return false;
-    } finally {
-      probeClient?.disconnect();
-      setCheckingConnection(false);
-    }
     },
     [allowQueryTokenAuth]
   );
@@ -302,7 +420,7 @@ export function OnboardingScreen({
     } catch (error) {
       setConnectionCheck({
         kind: 'error',
-        message: (error as Error).message || 'Saving the bridge profile failed.',
+        message: (error as Error).message || 'Saving the connection failed.',
       });
     }
   }, [normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
@@ -322,6 +440,12 @@ export function OnboardingScreen({
     setOnboardingStep('connect');
   }, []);
 
+  const goBackToIntro = useCallback(() => {
+    setOnboardingStep('intro');
+    setFormError(null);
+    setConnectionCheck({ kind: 'idle' });
+  }, []);
+
   const closeScanner = useCallback(() => {
     setScannerVisible(false);
     setScannerLocked(false);
@@ -336,7 +460,7 @@ export function OnboardingScreen({
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        setFormError('Camera permission is required to scan bridge QR.');
+        setFormError('Camera permission is required to scan the pairing QR.');
         return;
       }
     }
@@ -406,72 +530,80 @@ export function OnboardingScreen({
                   <BrandMark size={24} />
                   <Text style={styles.introBrandName}>Clawdex</Text>
                 </View>
-                <AmbientBadge icon="lock-closed-outline" label="Private bridge" />
               </View>
 
-              <ScrollView
-                style={styles.introScroll}
-                contentContainerStyle={styles.introScrollContent}
-                showsVerticalScrollIndicator={false}
-              >
-                <LinearGradient
-                  colors={introHeroGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.introHero}
-                >
-                  <Text style={styles.introHeroEyebrow}>Mobile control surface</Text>
-                  <Text style={styles.introHeroTitle}>Run Codex away from your desk.</Text>
-                  <Text style={styles.introHeroDescription}>
-                    Continue threads, review work, and approve changes from a paired private
-                    bridge.
-                  </Text>
-                </LinearGradient>
-
-                <View style={styles.introSectionHeader}>
-                  <Text style={styles.introSectionTitle}>What you can do from mobile</Text>
-                  <Text style={styles.introSectionSubtitle}>
-                    The phone UI should feel like a control surface, not a read-only mirror.
-                  </Text>
-                </View>
-
-                <View style={styles.introFeatureGrid}>
-                  {INTRO_FEATURES.map((feature) => (
-                    <IntroFeatureCard
-                      key={feature.title}
-                      icon={feature.icon}
-                      title={feature.title}
-                      description={feature.description}
-                    />
-                  ))}
-                </View>
-
-                <BlurView intensity={40} tint={theme.blurTint} style={styles.introContextCard}>
-                  <Text style={styles.introContextTitle}>Best on trusted networks</Text>
-                  <Text style={styles.introContextText}>
-                    Built for your own machine and private network paths. Pair over LAN nearby, or
-                    use Tailscale when the bridge lives on another device.
-                  </Text>
-                  <View style={styles.introContextPillRow}>
-                    <AmbientBadge icon="git-network-outline" label="Private network only" />
-                    <AmbientBadge icon="shield-checkmark-outline" label="Token auth required" />
+              <View style={styles.introBody}>
+                <Animated.View style={introHeroAnimatedStyle}>
+                  <View style={styles.introHero}>
+                    <View style={styles.introHeroArt}>
+                      <View
+                        style={styles.introHeroEngineCloud}
+                        accessibilityLabel="Codex, Cursor, and OpenCode"
+                      >
+                        <View style={[styles.introHeroEngineCard, styles.introHeroEngineCardCodex]}>
+                          <Image
+                            source={codexMarkPng}
+                            resizeMode="contain"
+                            style={styles.introHeroEngineCardLogo}
+                          />
+                        </View>
+                        <View style={[styles.introHeroEngineCard, styles.introHeroEngineCardCursor]}>
+                          <Image
+                            source={cursorMarkPng}
+                            resizeMode="contain"
+                            style={styles.introHeroEngineCardLogo}
+                          />
+                        </View>
+                        <View
+                          style={[styles.introHeroEngineCard, styles.introHeroEngineCardOpenCode]}
+                        >
+                          <Image
+                            source={opencodeMarkPng}
+                            resizeMode="contain"
+                            style={[
+                              styles.introHeroEngineCardLogo,
+                              styles.introHeroEngineCardLogoWide,
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.introHeroTitleWrap}>
+                      <Animated.View
+                        style={[styles.introHeroEngineWord, introEngineAnimatedStyle]}
+                      >
+                        <Text
+                          style={styles.introHeroEngineLabel}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                        >
+                          {introEngineMark.label}
+                        </Text>
+                      </Animated.View>
+                      <Text
+                        style={styles.introHeroTitleTail}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                      >
+                        on your phone
+                      </Text>
+                    </View>
+                    <Text style={styles.introHeroDescription}>
+                      Pair your phone with your own machine.
+                    </Text>
                   </View>
-                </BlurView>
-              </ScrollView>
-
-              <View style={styles.introFooter}>
-                {showOnboardingDock ? <OnboardingStepDock currentStage={currentSetupStage} /> : null}
-                <Pressable
-                  onPress={goToConnectStep}
-                  style={({ pressed }) => [
-                    styles.introNextButton,
-                    pressed && styles.introNextButtonPressed,
-                  ]}
-                >
-                  <Text style={styles.introNextButtonText}>Pair your bridge</Text>
-                  <Ionicons name="arrow-forward" size={19} color={theme.colors.black} />
-                </Pressable>
+                </Animated.View>
               </View>
+
+              <Animated.View style={[styles.introFooter, introActionsAnimatedStyle]}>
+                <ChoiceAction
+                  variant="primary"
+                  logo="clawdex"
+                  title="Private connection"
+                  meta="Your machine"
+                  onPress={goToConnectStep}
+                />
+              </Animated.View>
             </View>
           ) : (
             <View style={styles.connectRoot}>
@@ -481,16 +613,32 @@ export function OnboardingScreen({
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
-                <LinearGradient
-                  colors={connectHeroGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.connectHero}
-                >
-                  <View style={styles.heroTopRow}>
-                    <View style={styles.heroIconWrap}>
-                      <Ionicons name="hardware-chip-outline" size={20} color={theme.colors.textPrimary} />
-                    </View>
+                {showOnboardingDock ? <OnboardingStepDock currentStage={currentSetupStage} /> : null}
+                <View style={styles.connectHeaderRow}>
+                  <View style={styles.heroTopRowLeft}>
+                    {showOnboardingDock ? (
+                      <Pressable
+                        onPress={goBackToIntro}
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          styles.connectTopButton,
+                          pressed && styles.cancelBtnPressed,
+                        ]}
+                      >
+                        <Ionicons name="chevron-back" size={15} color={theme.colors.textPrimary} />
+                        <Text style={styles.connectTopButtonText}>Back</Text>
+                      </Pressable>
+                    ) : (
+                      <View style={styles.heroIconWrap}>
+                        <Ionicons
+                          name="hardware-chip-outline"
+                          size={20}
+                          color={theme.colors.textPrimary}
+                        />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.heroTopRowRight}>
                     {(mode === 'edit' || mode === 'add' || mode === 'reconnect') && onCancel ? (
                       <Pressable
                         onPress={onCancel}
@@ -501,53 +649,40 @@ export function OnboardingScreen({
                       </Pressable>
                     ) : null}
                   </View>
-                  <Text style={styles.connectEyebrow}>{connectEyebrow}</Text>
-                  <Text style={styles.heroTitle}>{modeTitle}</Text>
-                  <Text style={styles.heroDescription}>{modeDescription}</Text>
-                </LinearGradient>
+                </View>
 
                 <BlurView intensity={55} tint={theme.blurTint} style={styles.formCard}>
                   <View style={styles.commandPanel}>
-                    <View style={styles.formSectionHeader}>
-                      <Text style={styles.formSectionEyebrow}>1. Start the bridge</Text>
-                      <Text style={styles.formSectionTitle}>
-                        Run these on your server first. This installs the CLI, starts the bridge,
-                        and prints the pairing QR used here.
-                      </Text>
-                    </View>
+                    <Text style={styles.formSectionEyebrow}>1. Start</Text>
                     <CommandSnippet
-                      label="Run on your server"
+                      label="Desktop command"
                       command={BRIDGE_SETUP_COMMANDS}
-                      hint="After it starts, scan the pairing QR in this screen."
                     />
                   </View>
 
                   <View style={styles.formSectionHeader}>
-                    <Text style={styles.formSectionEyebrow}>2. Pair the bridge</Text>
-                    <Text style={styles.formSectionTitle}>
-                      Scan the bridge QR first. If that is not available, enter the URL and token
-                      manually.
-                    </Text>
+                    <Text style={styles.formSectionEyebrow}>2. Pair</Text>
+                    <Text style={styles.formSectionTitle}>Scan QR or paste details.</Text>
                   </View>
 
-                  <Pressable
-                    onPress={() => {
-                      void openScanner();
-                    }}
-                    style={({ pressed }) => [
-                      styles.scanButton,
-                      pressed && styles.scanButtonPressed,
-                    ]}
-                  >
-                    <Ionicons name="qr-code-outline" size={16} color={theme.colors.textPrimary} />
-                    <Text style={styles.scanButtonText}>Scan bridge QR</Text>
-                  </Pressable>
-                  <Text style={styles.helperText}>
-                    Recommended first. QR fills the bridge URL and token together.
-                  </Text>
+                  <View style={styles.connectPrimaryActions}>
+                    <Pressable
+                      onPress={() => {
+                        void openScanner();
+                      }}
+                      style={({ pressed }) => [
+                        styles.scanButton,
+                        styles.connectActionPrimary,
+                        pressed && styles.scanButtonPressed,
+                      ]}
+                    >
+                      <Ionicons name="qr-code-outline" size={16} color={theme.colors.textPrimary} />
+                      <Text style={styles.scanButtonText}>Scan QR</Text>
+                    </Pressable>
+                  </View>
 
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Bridge URL</Text>
+                    <Text style={styles.label}>URL</Text>
                     <View style={styles.inputRow}>
                       <View style={styles.inputIconWrap}>
                         <Ionicons name="globe-outline" size={16} color={theme.colors.textSecondary} />
@@ -575,10 +710,7 @@ export function OnboardingScreen({
                   </View>
 
                   <View style={styles.fieldGroup}>
-                    <View style={styles.tokenHeaderRow}>
-                      <Text style={styles.label}>Bridge Token</Text>
-                      <Text style={styles.optionalLabel}>Required</Text>
-                    </View>
+                    <Text style={styles.label}>Token</Text>
                     <View style={styles.tokenInputWrap}>
                       <View style={styles.inputRow}>
                         <View style={styles.inputIconWrap}>
@@ -594,7 +726,7 @@ export function OnboardingScreen({
                           autoCapitalize="none"
                           autoCorrect={false}
                           keyboardType="default"
-                          placeholder="Paste bridge token"
+                          placeholder="Paste connection token"
                           placeholderTextColor={theme.colors.textMuted}
                           style={styles.inputText}
                           secureTextEntry={tokenHidden}
@@ -623,19 +755,6 @@ export function OnboardingScreen({
                     </View>
                   </View>
 
-                  <Text style={styles.helperText}>
-                    URL supports `http`, `https`, `ws`, and `wss`. `/rpc` is added automatically.
-                  </Text>
-
-                  {normalizedBridgeUrl ? (
-                    <View style={styles.previewWrap}>
-                      <Text style={styles.previewLabel}>Normalized target</Text>
-                      <Text selectable style={styles.previewValue}>
-                        {normalizedBridgeUrl}
-                      </Text>
-                    </View>
-                  ) : null}
-
                   {insecureRemoteWarning ? (
                     <StatusBanner
                       tone="warning"
@@ -663,10 +782,7 @@ export function OnboardingScreen({
                   ) : null}
 
                   <View style={styles.formSectionHeader}>
-                    <Text style={styles.formSectionEyebrow}>3. Verify and continue</Text>
-                    <Text style={styles.formSectionTitle}>
-                      Confirm the bridge responds before saving it into the app.
-                    </Text>
+                    <Text style={styles.formSectionEyebrow}>3. Save</Text>
                   </View>
 
                   <View style={styles.actionRow}>
@@ -688,38 +804,44 @@ export function OnboardingScreen({
                       )}
                       <Text style={styles.secondaryButtonText}>Test Connection</Text>
                     </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        void handleSave();
-                      }}
-                      disabled={checkingConnection}
-                      style={({ pressed }) => [
-                        styles.primaryButton,
-                        pressed && !checkingConnection && styles.primaryButtonPressed,
-                        checkingConnection && styles.primaryButtonDisabled,
-                      ]}
-                    >
-                      {checkingConnection ? (
-                        <ActivityIndicator size="small" color={theme.colors.black} />
-                      ) : (
-                        <Ionicons name="arrow-forward" size={16} color={theme.colors.black} />
-                      )}
-                      <Text style={styles.primaryButtonText}>
-                        {mode === 'edit'
-                          ? 'Save URL'
-                          : mode === 'reconnect'
-                            ? 'Reconnect'
-                            : 'Continue'}
-                      </Text>
-                    </Pressable>
                   </View>
                 </BlurView>
               </ScrollView>
-              {showOnboardingDock ? (
-                <View style={styles.connectFooter}>
-                  <OnboardingStepDock currentStage={currentSetupStage} />
-                </View>
-              ) : null}
+              <View style={styles.connectFooter}>
+                <Pressable
+                  onPress={() => {
+                    void handleSave();
+                  }}
+                  disabled={checkingConnection}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    styles.connectFooterButton,
+                    pressed && !checkingConnection && styles.primaryButtonPressed,
+                    checkingConnection && styles.primaryButtonDisabled,
+                  ]}
+                >
+                  {checkingConnection ? (
+                    <View style={styles.primaryButtonIconWrap}>
+                      <ActivityIndicator size="small" color={theme.colors.accentText} />
+                    </View>
+                  ) : (
+                    <View style={styles.primaryButtonIconWrap}>
+                      <Ionicons
+                        name="shield-checkmark-outline"
+                        size={18}
+                        color={theme.colors.accentText}
+                      />
+                    </View>
+                  )}
+                  <View style={styles.primaryButtonContent}>
+                    <View style={styles.primaryButtonCopy}>
+                      <Text style={styles.primaryButtonText}>{continueLabel}</Text>
+                      <Text style={styles.primaryButtonSubtext}>Start using Clawdex</Text>
+                    </View>
+                    <Ionicons name="arrow-forward" size={20} color={theme.colors.accentText} />
+                  </View>
+                </Pressable>
+              </View>
             </View>
           )}
           <Modal
@@ -731,7 +853,7 @@ export function OnboardingScreen({
             <View style={styles.scannerModalRoot}>
               <View style={styles.scannerSheet}>
                 <View style={styles.scannerHeader}>
-                  <Text style={styles.scannerTitle}>Scan Bridge QR</Text>
+                  <Text style={styles.scannerTitle}>Scan Pairing QR</Text>
                   <Pressable
                     onPress={closeScanner}
                     hitSlop={8}
@@ -753,13 +875,13 @@ export function OnboardingScreen({
                   ) : (
                     <View style={styles.scannerPermissionWrap}>
                       <Text style={styles.scannerPermissionText}>
-                        Camera permission is required to scan bridge QR.
+                        Camera permission is required to scan the pairing QR.
                       </Text>
                     </View>
                   )}
                 </View>
                 <Text style={styles.scannerHintText}>
-                  Scan the bridge QR to autofill URL and token (or token-only fallback).
+                  Scan the pairing QR to fill the URL and token.
                 </Text>
                 {scannerError ? <Text style={styles.errorText}>{scannerError}</Text> : null}
               </View>
@@ -767,47 +889,6 @@ export function OnboardingScreen({
           </Modal>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </View>
-  );
-}
-
-function IntroFeatureCard({
-  icon,
-  title,
-  description,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
-}) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <View style={styles.introFeatureCard}>
-      <View style={styles.introFeatureIconWrap}>
-        <Ionicons name={icon} size={16} color={theme.colors.textPrimary} />
-      </View>
-      <View style={styles.introFeatureTextWrap}>
-        <Text style={styles.introFeatureTitle}>{title}</Text>
-        <Text style={styles.introFeatureDescription}>{description}</Text>
-      </View>
-    </View>
-  );
-}
-
-function AmbientBadge({
-  icon,
-  label,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-}) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <View style={styles.ambientBadge}>
-      <Ionicons name={icon} size={13} color={theme.colors.textSecondary} />
-      <Text style={styles.ambientBadgeText}>{label}</Text>
     </View>
   );
 }
@@ -868,11 +949,9 @@ function OnboardingStepDock({ currentStage }: { currentStage: number }) {
 function CommandSnippet({
   label,
   command,
-  hint,
 }: {
   label: string;
   command: string;
-  hint: string;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -885,6 +964,14 @@ function CommandSnippet({
       setCopied(false);
     }, 1400);
   }, [command]);
+  const handleShareGuide = useCallback(() => {
+    const title = 'Clawdex bridge setup';
+    void Share.share(
+      Platform.OS === 'ios'
+        ? { title, url: CLAWDEX_BRIDGE_SETUP_URL }
+        : { title, message: `${title}\n${CLAWDEX_BRIDGE_SETUP_URL}` }
+    ).catch(() => {});
+  }, []);
 
   return (
     <View style={styles.commandCard}>
@@ -893,37 +980,49 @@ function CommandSnippet({
           <Ionicons name="terminal-outline" size={14} color={theme.colors.textSecondary} />
           <Text style={styles.commandCardLabel}>{label}</Text>
         </View>
-        <Pressable
-          onPress={() => {
-            void handleCopy();
-          }}
-          style={({ pressed }) => [
-            styles.commandCopyButton,
-            copied && styles.commandCopyButtonCopied,
-            pressed && styles.commandCopyButtonPressed,
-          ]}
-        >
-          <Ionicons
-            name={copied ? 'checkmark-outline' : 'copy-outline'}
-            size={14}
-            color={copied ? theme.colors.black : theme.colors.textPrimary}
-          />
-          <Text
-            style={[
-              styles.commandCopyButtonText,
-              copied && styles.commandCopyButtonTextCopied,
+        <View style={styles.commandCardActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Share bridge setup guide"
+            onPress={handleShareGuide}
+            style={({ pressed }) => [
+              styles.commandIconButton,
+              pressed && styles.commandCopyButtonPressed,
             ]}
           >
-            {copied ? 'Copied' : 'Copy'}
-          </Text>
-        </Pressable>
+            <Ionicons name="share-outline" size={14} color={theme.colors.textPrimary} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              void handleCopy();
+            }}
+            style={({ pressed }) => [
+              styles.commandCopyButton,
+              copied && styles.commandCopyButtonCopied,
+              pressed && styles.commandCopyButtonPressed,
+            ]}
+          >
+            <Ionicons
+              name={copied ? 'checkmark-outline' : 'copy-outline'}
+              size={14}
+              color={copied ? theme.colors.accentText : theme.colors.textPrimary}
+            />
+            <Text
+              style={[
+                styles.commandCopyButtonText,
+                copied && styles.commandCopyButtonTextCopied,
+              ]}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
       <View style={styles.commandCodeWrap}>
         <Text selectable style={styles.commandCodeText}>
           {command}
         </Text>
       </View>
-      <Text style={styles.commandCardHint}>{hint}</Text>
     </View>
   );
 }
@@ -1041,7 +1140,6 @@ function parsePairingPayload(rawValue: string): PairingPayload | null {
 }
 
 const createStyles = (theme: AppTheme) => {
-  const glassBadgeBackground = theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.72)';
   const glassDockBackground = theme.isDark ? 'rgba(12, 14, 18, 0.76)' : 'rgba(246, 249, 252, 0.90)';
   const glassSubtleBackground = theme.isDark ? 'rgba(255,255,255,0.03)' : theme.colors.bgInput;
   const glassFeatureBackground = theme.isDark ? 'rgba(7, 9, 12, 0.72)' : 'rgba(243, 247, 251, 0.88)';
@@ -1087,6 +1185,7 @@ const createStyles = (theme: AppTheme) => {
     paddingTop: theme.spacing.md,
     paddingBottom: theme.spacing.xxl,
     gap: theme.spacing.md,
+    justifyContent: 'space-between',
   },
   introHeader: {
     flexDirection: 'row',
@@ -1103,56 +1202,114 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.headline,
     color: theme.colors.textPrimary,
     fontSize: 18,
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   },
-  introScroll: {
+  introBody: {
     flex: 1,
-  },
-  introScrollContent: {
-    paddingBottom: theme.spacing.lg,
-    gap: theme.spacing.md,
+    justifyContent: 'center',
   },
   introHero: {
-    borderRadius: 24,
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    paddingHorizontal: theme.spacing.sm,
+  },
+  introHeroArt: {
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  introHeroEngineCloud: {
+    width: 236,
+    height: 158,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  introHeroEngineCard: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderLight,
+    backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.76)',
+    boxShadow: theme.isDark
+      ? '0px 12px 24px rgba(0, 0, 0, 0.22)'
+      : '0px 10px 20px rgba(15, 31, 54, 0.10)',
+  },
+  introHeroEngineCardCodex: {
+    top: 4,
+    left: 82,
+    width: 72,
+    height: 72,
+    borderRadius: 24,
     borderColor: theme.colors.borderHighlight,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.sm,
-    overflow: 'hidden',
+    backgroundColor: theme.isDark ? 'rgba(181, 189, 204, 0.16)' : 'rgba(255,255,255,0.86)',
   },
-  introHeroEyebrow: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+  introHeroEngineCardCursor: {
+    left: 24,
+    top: 82,
+    width: 66,
+    height: 66,
+    borderRadius: 22,
+    borderColor: theme.isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15, 23, 42, 0.16)',
+    backgroundColor: theme.isDark ? 'rgba(15, 23, 42, 0.96)' : '#111827',
+    transform: [{ rotate: '-8deg' }],
   },
-  introHeroTitle: {
+  introHeroEngineCardOpenCode: {
+    right: 12,
+    top: 88,
+    width: 94,
+    height: 58,
+    borderRadius: 20,
+    transform: [{ rotate: '7deg' }],
+  },
+  introHeroEngineCardLogo: {
+    width: 38,
+    height: 38,
+  },
+  introHeroEngineCardLogoWide: {
+    width: 64,
+    height: 36,
+  },
+  introHeroTitleWrap: {
+    width: '100%',
+    maxWidth: 340,
+    minHeight: 82,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+  },
+  introHeroEngineWord: {
+    minWidth: 160,
+    maxWidth: 260,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  introHeroEngineLabel: {
     ...theme.typography.largeTitle,
-    fontSize: 22,
-    lineHeight: 26,
-    letterSpacing: -0.4,
+    flexShrink: 1,
+    fontSize: 28,
+    lineHeight: 32,
+    letterSpacing: 0,
+    textAlign: 'center',
+    color: theme.colors.textPrimary,
+  },
+  introHeroTitleTail: {
+    ...theme.typography.largeTitle,
+    fontSize: 28,
+    lineHeight: 32,
+    letterSpacing: 0,
+    textAlign: 'center',
+    color: theme.colors.textPrimary,
   },
   introHeroDescription: {
     ...theme.typography.body,
     color: theme.colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  ambientBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 30,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.radius.full,
-    backgroundColor: glassBadgeBackground,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-  },
-  ambientBadgeText: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 280,
   },
   stepperDock: {
     borderRadius: 16,
@@ -1215,7 +1372,7 @@ const createStyles = (theme: AppTheme) => {
     lineHeight: 12,
   },
   stepperPillIndexTextActive: {
-    color: theme.colors.black,
+    color: theme.colors.accentText,
   },
   stepperPillTitle: {
     ...theme.typography.caption,
@@ -1238,7 +1395,7 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.9,
+    letterSpacing: 0,
   },
   introSectionSubtitle: {
     ...theme.typography.body,
@@ -1305,31 +1462,13 @@ const createStyles = (theme: AppTheme) => {
   introFooter: {
     gap: theme.spacing.sm,
   },
-  introNextButton: {
-    borderRadius: 18,
-    backgroundColor: theme.colors.accent,
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-  },
-  introNextButtonPressed: {
-    backgroundColor: theme.colors.accentPressed,
-  },
-  introNextButtonText: {
-    ...theme.typography.headline,
-    color: theme.colors.black,
-    fontSize: 17,
-    fontWeight: '700',
-  },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.xxl,
+    paddingBottom: theme.spacing.lg,
     gap: theme.spacing.md,
   },
   connectRoot: {
@@ -1338,20 +1477,23 @@ const createStyles = (theme: AppTheme) => {
   connectFooter: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.sm,
-    paddingBottom: theme.spacing.md,
+    paddingBottom: theme.spacing.xxl,
   },
-  connectHero: {
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderHighlight,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.xs,
-    overflow: 'hidden',
-  },
-  heroTopRow: {
+  connectHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  heroTopRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  heroTopRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
   },
   heroIconWrap: {
     width: 32,
@@ -1374,23 +1516,21 @@ const createStyles = (theme: AppTheme) => {
   cancelBtnPressed: {
     opacity: 0.75,
   },
-  connectEyebrow: {
+  connectTopButton: {
+    minHeight: 32,
+    borderRadius: theme.radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderLight,
+    backgroundColor: theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.66)',
+    paddingHorizontal: theme.spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  connectTopButtonText: {
     ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  heroTitle: {
-    ...theme.typography.largeTitle,
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.45,
-  },
-  heroDescription: {
-    ...theme.typography.body,
-    color: theme.colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 19,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
   },
   formCard: {
     borderRadius: 20,
@@ -1401,6 +1541,12 @@ const createStyles = (theme: AppTheme) => {
     gap: theme.spacing.md,
     overflow: 'hidden',
   },
+  connectPrimaryActions: {
+    gap: theme.spacing.sm,
+  },
+  connectActionPrimary: {
+    minHeight: 48,
+  },
   formSectionHeader: {
     gap: theme.spacing.xs,
   },
@@ -1408,7 +1554,7 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.85,
+    letterSpacing: 0,
   },
   formSectionTitle: {
     ...theme.typography.headline,
@@ -1460,11 +1606,6 @@ const createStyles = (theme: AppTheme) => {
     color: theme.colors.textSecondary,
     lineHeight: 18,
   },
-  helperText: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    lineHeight: 18,
-  },
   commandPanel: {
     gap: theme.spacing.sm,
     paddingTop: theme.spacing.xs,
@@ -1490,11 +1631,17 @@ const createStyles = (theme: AppTheme) => {
     flex: 1,
     minWidth: 0,
   },
+  commandCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    flexShrink: 0,
+  },
   commandCardLabel: {
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
-    letterSpacing: 0.2,
+    letterSpacing: 0,
   },
   commandCopyButton: {
     minHeight: 30,
@@ -1516,13 +1663,23 @@ const createStyles = (theme: AppTheme) => {
   commandCopyButtonPressed: {
     opacity: 0.84,
   },
+  commandIconButton: {
+    width: 30,
+    height: 30,
+    borderRadius: theme.radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bgInput,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   commandCopyButtonText: {
     ...theme.typography.caption,
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },
   commandCopyButtonTextCopied: {
-    color: theme.colors.black,
+    color: theme.colors.accentText,
   },
   commandCodeWrap: {
     borderRadius: 12,
@@ -1538,30 +1695,14 @@ const createStyles = (theme: AppTheme) => {
     fontSize: 12,
     lineHeight: 18,
   },
-  commandCardHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    lineHeight: 16,
-  },
   fieldGroup: {
     gap: theme.spacing.sm,
   },
   label: {
     ...theme.typography.caption,
     textTransform: 'uppercase',
-    letterSpacing: 0.85,
+    letterSpacing: 0,
     color: theme.colors.textMuted,
-  },
-  tokenHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  optionalLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontSize: 11,
   },
   inputRow: {
     flex: 1,
@@ -1635,24 +1776,6 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.headline,
     color: theme.colors.textPrimary,
     fontWeight: '700',
-  },
-  previewWrap: {
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: glassSubtleBackground,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    gap: theme.spacing.xs,
-  },
-  previewLabel: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  previewValue: {
-    ...theme.typography.mono,
-    color: theme.colors.textPrimary,
-    fontSize: 13,
   },
   statusBanner: {
     flexDirection: 'row',
@@ -1729,6 +1852,14 @@ const createStyles = (theme: AppTheme) => {
     borderRadius: 16,
     minHeight: 54,
   },
+  connectFooterButton: {
+    flex: 0,
+    minHeight: 78,
+    borderRadius: 24,
+    justifyContent: 'flex-start',
+    paddingHorizontal: theme.spacing.md,
+    gap: theme.spacing.md,
+  },
   primaryButtonPressed: {
     backgroundColor: theme.colors.accentPressed,
   },
@@ -1737,8 +1868,38 @@ const createStyles = (theme: AppTheme) => {
   },
   primaryButtonText: {
     ...theme.typography.headline,
-    color: theme.colors.black,
+    color: theme.colors.accentText,
     fontWeight: '700',
+  },
+  primaryButtonIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.isDark ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.38)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.isDark ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.48)',
+  },
+  primaryButtonContent: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing.md,
+  },
+  primaryButtonCopy: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: 2,
+  },
+  primaryButtonSubtext: {
+    ...theme.typography.caption,
+    color: theme.colors.accentText,
+    opacity: 0.72,
+    fontWeight: '600',
   },
   scannerModalRoot: {
     flex: 1,

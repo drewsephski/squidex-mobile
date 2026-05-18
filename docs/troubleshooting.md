@@ -39,6 +39,21 @@ npm run stop:services
 - On secure-launcher installs, `Settings > Bridge Maintenance > Restart bridge safely` can do that from the phone.
 - If an in-app bridge update fails, inspect `.bridge-updater.log` and `.bridge-update-status.json` in the bridge install root.
 
+## Voice transcription says no credentials were found
+
+- The bridge can transcribe with `OPENAI_API_KEY`, `BRIDGE_CHATGPT_ACCESS_TOKEN`, a legacy bridge token cache, or the Codex-managed ChatGPT token in `$CODEX_HOME/auth.json`.
+- If Codex login just completed, restart the bridge once so it reloads the Codex auth home:
+
+```bash
+npm run secure:bridge
+```
+
+- You can inspect whether Codex saved auth:
+
+```bash
+ls -la "${CODEX_HOME:-$HOME/.codex}/auth.json"
+```
+
 ## Local browser preview does not open
 
 - The in-app browser only supports loopback targets from the bridge host: `localhost`, `127.0.0.1`, or `::1`.

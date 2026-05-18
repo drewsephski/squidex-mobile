@@ -2,25 +2,29 @@
 
 This guide is the detailed companion to the top-level `README.md`.
 
+For bridge-driven provider UI payloads such as Codex goals, see `docs/bridge-ui-surfaces.md`.
+
 ## Choosing Harnesses
 
 The setup wizard now lets you choose which harnesses the phone should control.
 
-If you want both Codex and OpenCode:
+If you want Codex, OpenCode, and Cursor:
 
 ```bash
-clawdex init --engines codex,opencode
+clawdex init --engines codex,opencode,cursor
 ```
 
 From a source checkout, the equivalent command is:
 
 ```bash
-npm run setup:wizard -- --engines codex,opencode
+npm run setup:wizard -- --engines codex,opencode,cursor
 ```
 
-That writes `BRIDGE_ENABLED_ENGINES=codex,opencode` into `.env.secure`, so the bridge starts both backends and the mobile app can control both from one UI.
+That writes `BRIDGE_ENABLED_ENGINES=codex,opencode,cursor` into `.env.secure`, so the bridge starts the selected backends and the mobile app can control them from one UI. When Cursor is selected, `clawdex init` uses the bundled `cursor-app-server`, asks for a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, and saves it in `.env.secure`. Cursor documents this under CLI authentication: https://docs.cursor.com/en/cli/reference/authentication
 
-If you want only one harness, use `--engine codex` or `--engine opencode`.
+If you want only one harness, use `--engine codex`, `--engine opencode`, or `--engine cursor`.
+
+Cursor usage limits are not exposed by Cursor's public API today. The app shows key status, key metadata, runtime state, and models from Cursor; plan or weekly usage details remain in Cursor.
 
 ## Onboarding Output Cues
 
@@ -51,10 +55,10 @@ npm install
 npm run secure:setup
 ```
 
-To generate OpenCode-first config instead:
+To generate multi-harness config instead:
 
 ```bash
-BRIDGE_ENABLED_ENGINES=codex,opencode npm run secure:setup
+BRIDGE_ENABLED_ENGINES=codex,opencode,cursor npm run secure:setup
 ```
 
 Creates/updates:
@@ -68,13 +72,13 @@ Creates/updates:
 npm run secure:bridge
 ```
 
-If you want a one-off OpenCode launch without rewriting `.env.secure`:
+If you want a one-off multi-harness launch without rewriting `.env.secure`:
 
 ```bash
-BRIDGE_ENABLED_ENGINES=codex,opencode npm run secure:bridge
+BRIDGE_ENABLED_ENGINES=codex,opencode,cursor npm run secure:bridge
 ```
 
-When both CLIs are selected, the bridge starts both backends and merges chat lists while still routing each thread by engine.
+When multiple harnesses are selected, the bridge starts each backend and merges chat lists while still routing each thread by engine.
 
 ### 4) Pair from the mobile app
 
@@ -104,6 +108,18 @@ npm run mobile
 ```
 
 `npm run mobile` uses `scripts/start-expo.sh`, which sets `REACT_NATIVE_PACKAGER_HOSTNAME` from your secure config so QR resolution is predictable.
+
+If you want one command that switches the bridge between LAN/VLAN and Tailscale, preserves your
+existing bridge token and enabled harnesses, restarts the bridge in the background, and then opens
+Expo:
+
+```bash
+npm run stack:lan
+npm run stack:tailscale
+```
+
+Both wrappers call `scripts/start-mobile-stack.sh`. Pass `--expo ios` or `--expo android` if you
+want the same flow but to open a native Expo run command instead of the default `mobile` mode.
 
 ## Advanced Knobs
 
@@ -173,15 +189,21 @@ npm run teardown -- --yes
 
 | Variable | Purpose |
 |---|---|
+| `BRIDGE_NETWORK_MODE` | bridge connectivity mode (`tailscale` or `local`) |
 | `BRIDGE_HOST` | bind host for rust bridge |
 | `BRIDGE_PORT` | bridge port (default `8787`) |
 | `BRIDGE_PREVIEW_PORT` | browser preview port for proxied localhost web apps (default `BRIDGE_PORT + 1`) |
+| `BRIDGE_CONNECT_URL` | externally reachable bridge base URL used for pairing/QR output |
+| `BRIDGE_PREVIEW_CONNECT_URL` | externally reachable browser preview base URL |
 | `BRIDGE_AUTH_TOKEN` | required auth token |
 | `BRIDGE_ALLOW_QUERY_TOKEN_AUTH` | query-token auth fallback |
 | `CODEX_CLI_BIN` | codex executable |
 | `BRIDGE_ACTIVE_ENGINE` | internal preferred routing backend used when multiple harnesses are enabled |
-| `BRIDGE_ENABLED_ENGINES` | selected harnesses to expose (`codex`, `opencode`, or both) |
+| `BRIDGE_ENABLED_ENGINES` | selected harnesses to expose (`codex`, `opencode`, `cursor`, or a comma-separated mix) |
 | `OPENCODE_CLI_BIN` | opencode executable for dual-engine startup |
+| `CURSOR_APP_SERVER_BIN` | Cursor app-server executable, usually the `cursor-app-server` binary bundled with `clawdex-mobile` |
+| `CURSOR_API_KEY` | Cursor account API key used by the Cursor SDK harness; create it from Cursor Dashboard > Integrations > User API Keys, then provide it to `clawdex init` when Cursor is selected. See https://docs.cursor.com/en/cli/reference/authentication |
+| `CURSOR_MODEL` | optional Cursor model id for non-interactive host defaults; normal mobile chats send the selected model |
 | `BRIDGE_OPENCODE_HOST` | loopback host for spawned opencode server |
 | `BRIDGE_OPENCODE_PORT` | loopback port for spawned opencode server |
 | `BRIDGE_OPENCODE_SERVER_USERNAME` | basic-auth username passed to opencode server |
@@ -213,8 +235,8 @@ If you enable the optional tip jar:
 
 ## Production Readiness Checklist
 
-- Keep bridge network-private only (Tailscale/private LAN/VPN + host firewall)
-- Require `BRIDGE_AUTH_TOKEN`
+- Keep bridge network-private only by default (Tailscale/private LAN/VPN + host firewall)
+- Require bridge auth with `BRIDGE_AUTH_TOKEN`
 - Keep `BRIDGE_ALLOW_QUERY_TOKEN_AUTH=true` only on private networks (required for Android WS auth fallback)
 - Do not set `BRIDGE_ALLOW_INSECURE_NO_AUTH=true` outside local debugging
 - Scope `BRIDGE_WORKDIR` to minimal required root
@@ -341,12 +363,17 @@ Automation verifies tag/version consistency and publishes to npm.
 - `bridge/approvals/list`
 - `bridge/approvals/resolve`
 - `bridge/userInput/resolve`
+- `bridge/ui/present`
+- `bridge/ui/update`
+- `bridge/ui/dismiss`
+- `bridge/ui/resolve`
 
 ### Notifications (examples)
 
 - `turn/*`, `item/*`
 - `bridge/approval.*`
 - `bridge/userInput.*`
+- `bridge/ui.*`
 - `bridge/terminal/completed`
 - `bridge/git/updated`
 - `bridge/connection/state`

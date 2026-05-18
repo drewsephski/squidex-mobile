@@ -6,7 +6,7 @@
 
 Run Codex or OpenCode from your phone. `clawdex-mobile` ships the bridge CLI plus bundled Rust bridge binaries for supported hosts, and the mobile app pairs to that bridge over Tailscale or local LAN.
 
-This project is for trusted/private networking only. Do not expose the bridge publicly.
+This project is for trusted/private networking by default. Keep the bridge on a private network, leave bridge auth enabled, and do not expose it directly to the public internet.
 
 ## What You Get
 
@@ -25,6 +25,7 @@ Before you start:
 - `git`
 - `codex` in `PATH` for the default Codex flow
 - `opencode` in `PATH` if you want the OpenCode flow
+- Cursor app-server is bundled with `clawdex-mobile` for the Cursor SDK flow
 
 Install the mobile app:
 
@@ -52,23 +53,23 @@ clawdex init
 clawdex stop
 ```
 
-## OpenCode Setup
+## Extra Harness Setup
 
-OpenCode is supported directly from the CLI now.
+OpenCode and Cursor can run beside Codex from the same bridge.
 
 ```bash
 npm install -g opencode-ai
 npm install -g clawdex-mobile@latest
-clawdex init --engines codex,opencode
+clawdex init --engines codex,opencode,cursor
 ```
 
-That writes `BRIDGE_ENABLED_ENGINES=codex,opencode` to `.env.secure`, so the mobile app can control both harnesses from one bridge.
+That writes `BRIDGE_ENABLED_ENGINES=codex,opencode,cursor` to `.env.secure`, so the mobile app can control the selected harnesses from one bridge. When Cursor is selected, `clawdex init` uses the bundled `cursor-app-server`, asks for a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, and saves it in `.env.secure`. Cursor documents this under CLI authentication: https://docs.cursor.com/en/cli/reference/authentication
 
 Notes:
 
 - `clawdex init` without flags now lets you multi-select harnesses in the wizard with Space, then Enter to continue.
-- Use `clawdex init --engine codex` or `clawdex init --engine opencode` if you want a single-harness setup.
-- Use `clawdex init --engines codex,opencode` if you want both non-interactively.
+- Use `clawdex init --engine codex`, `clawdex init --engine opencode`, or `clawdex init --engine cursor` if you want a single-harness setup.
+- For non-interactive host automation, set `CURSOR_API_KEY` before running setup. This should be a Cursor account API key for the Cursor agent/SDK, not an OpenAI, Anthropic, or other provider key configured inside the Cursor editor. `CURSOR_MODEL` is optional; the app model picker sends the model for normal chats.
 
 ## Monorepo Development
 
@@ -80,6 +81,16 @@ npm run setup:wizard
 npm run mobile
 ```
 
+For one-step restarts that switch the bridge network mode, reuse the existing token, start the
+bridge in the background, and then launch Expo:
+
+```bash
+npm run stack:lan
+npm run stack:tailscale
+```
+
+`stack:lan` is the local network path, so it also covers the same-device LAN/VLAN case.
+
 For an OpenCode-first repo checkout:
 
 ```bash
@@ -90,13 +101,15 @@ Use `npm run setup:wizard -- --no-start` if you only want to write config.
 
 ## Main Commands
 
-- `clawdex init [--engine codex|opencode] [--engines codex,opencode] [--no-start]`
+- `clawdex init [--engine codex|opencode|cursor] [--engines codex,opencode,cursor] [--no-start]`
 - `clawdex stop`
 - `clawdex upgrade` / `clawdex update`
 - `clawdex version`
 - `npm run setup:wizard`
 - `npm run secure:bridge`
 - `npm run mobile`
+- `npm run stack:lan`
+- `npm run stack:tailscale`
 - `npm run ios`
 - `npm run android`
 - `npm run stop:services`

@@ -1,4 +1,4 @@
-import { parseAppSettings } from '../appSettings';
+import { DEFAULT_WORKSPACE_CHAT_LIMIT, parseAppSettings } from '../appSettings';
 import { DEFAULT_FONT_PREFERENCE } from '../fonts';
 
 describe('parseAppSettings', () => {
@@ -11,7 +11,9 @@ describe('parseAppSettings', () => {
       approvalMode: 'yolo',
       showToolCalls: true,
       appearancePreference: 'system',
+      darkUiPalette: 'classic',
       fontPreference: DEFAULT_FONT_PREFERENCE,
+      workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
     });
   });
 
@@ -55,6 +57,7 @@ describe('parseAppSettings', () => {
     );
 
     expect(parsed.appearancePreference).toBe('dark');
+    expect(parsed.darkUiPalette).toBe('classic');
     expect(parsed.defaultEngineSettings.codex).toEqual({
       modelId: 'gpt-5.4',
       effort: 'high',
@@ -96,5 +99,43 @@ describe('parseAppSettings', () => {
     );
 
     expect(parsed.fontPreference).toBe('spaceGrotesk');
+  });
+
+  it('preserves darkUiPalette for version 10 settings', () => {
+    const parsed = parseAppSettings(
+      JSON.stringify({
+        version: 10,
+        darkUiPalette: 'grey',
+      })
+    );
+
+    expect(parsed.darkUiPalette).toBe('grey');
+  });
+
+  it('normalizes the workspace chat limit for version 9 settings', () => {
+    expect(
+      parseAppSettings(
+        JSON.stringify({
+          version: 9,
+          workspaceChatLimit: 10,
+        })
+      ).workspaceChatLimit
+    ).toBe(10);
+    expect(
+      parseAppSettings(
+        JSON.stringify({
+          version: 9,
+          workspaceChatLimit: 'all',
+        })
+      ).workspaceChatLimit
+    ).toBeNull();
+    expect(
+      parseAppSettings(
+        JSON.stringify({
+          version: 9,
+          workspaceChatLimit: 3,
+        })
+      ).workspaceChatLimit
+    ).toBe(DEFAULT_WORKSPACE_CHAT_LIMIT);
   });
 });

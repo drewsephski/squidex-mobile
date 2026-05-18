@@ -20,6 +20,8 @@ import {
 
 export type AppearancePreference = 'system' | 'light' | 'dark';
 export type ThemeMode = 'light' | 'dark';
+/** Colors used only when the resolved appearance is dark (System+dark or Dark). */
+export type DarkUiPalette = 'classic' | 'grey';
 
 export interface AppColors {
   bgMain: string;
@@ -50,10 +52,15 @@ export interface AppColors {
   statusComplete: string;
   statusError: string;
   statusIdle: string;
+  success: string;
+  successBg: string;
+  successBorder: string;
   warning: string;
   warningBg: string;
+  warningBorder: string;
   error: string;
   errorBg: string;
+  errorBorder: string;
   shadow: string;
   overlayBackdrop: string;
   white: string;
@@ -85,7 +92,8 @@ export interface AppTheme {
   statusBarStyle: 'dark-content' | 'light-content';
 }
 
-const darkColors: AppColors = {
+/** Deep OLED-friendly dark (original Clawdex mobile dark). */
+const darkClassicColors: AppColors = {
   bgMain: '#000000',
   bgSidebar: '#0C0D10',
   bgItem: '#1B1D21',
@@ -111,13 +119,64 @@ const darkColors: AppColors = {
   toolBlockBg: 'rgba(255, 255, 255, 0.09)',
   toolBlockBorder: '#5A6376',
   statusRunning: '#C2C9D8',
-  statusComplete: '#C6CDD9',
+  statusComplete: '#34C759',
   statusError: '#EF4444',
   statusIdle: '#B4BCCB',
+  success: '#34C759',
+  successBg: 'rgba(52, 199, 89, 0.12)',
+  successBorder: 'rgba(52, 199, 89, 0.32)',
   warning: '#F7D27E',
   warningBg: 'rgba(247, 210, 126, 0.08)',
+  warningBorder: 'rgba(247, 210, 126, 0.24)',
   error: '#EF4444',
   errorBg: 'rgba(239, 68, 68, 0.15)',
+  errorBorder: 'rgba(239, 68, 68, 0.30)',
+  shadow: '#000000',
+  overlayBackdrop: 'rgba(0, 0, 0, 0.52)',
+  white: '#FFFFFF',
+  black: '#000000',
+  transparent: 'transparent',
+};
+
+/** IDE-style charcoal dark (lifted grays, VS Code–like neutrals). */
+const darkGreyColors: AppColors = {
+  bgMain: '#1e1e1e',
+  bgSidebar: '#252526',
+  bgItem: '#2d2d30',
+  bgInput: '#3c3c3c',
+  bgElevated: '#252526',
+  bgCanvasAccent: 'rgba(255, 255, 255, 0.05)',
+  border: 'rgba(255, 255, 255, 0.12)',
+  borderLight: 'rgba(255, 255, 255, 0.08)',
+  borderHighlight: 'rgba(255, 255, 255, 0.16)',
+  textPrimary: '#e8e8e8',
+  textSecondary: '#cccccc',
+  textMuted: '#9d9d9d',
+  accent: '#d4d4d4',
+  accentPressed: '#b8b8b8',
+  accentText: '#1e1e1e',
+  userBubble: '#2d2d30',
+  userBubbleBorder: 'rgba(255, 255, 255, 0.14)',
+  assistantBubbleBg: 'transparent',
+  assistantBubbleBorder: 'transparent',
+  inlineCodeBg: '#1e1e1e',
+  inlineCodeBorder: 'rgba(255, 255, 255, 0.14)',
+  inlineCodeText: '#e8e8e8',
+  toolBlockBg: 'rgba(255, 255, 255, 0.06)',
+  toolBlockBorder: 'rgba(255, 255, 255, 0.14)',
+  statusRunning: '#89d185',
+  statusComplete: '#89d185',
+  statusError: '#f14c4c',
+  statusIdle: '#858585',
+  success: '#89d185',
+  successBg: 'rgba(137, 209, 133, 0.12)',
+  successBorder: 'rgba(137, 209, 133, 0.28)',
+  warning: '#cca700',
+  warningBg: 'rgba(204, 167, 0, 0.12)',
+  warningBorder: 'rgba(204, 167, 0, 0.28)',
+  error: '#f14c4c',
+  errorBg: 'rgba(241, 76, 76, 0.14)',
+  errorBorder: 'rgba(241, 76, 76, 0.30)',
   shadow: '#000000',
   overlayBackdrop: 'rgba(0, 0, 0, 0.52)',
   white: '#FFFFFF',
@@ -154,10 +213,15 @@ const lightColors: AppColors = {
   statusComplete: '#0E9F6E',
   statusError: '#D92D20',
   statusIdle: '#566C87',
+  success: '#0E9F6E',
+  successBg: 'rgba(14, 159, 110, 0.10)',
+  successBorder: 'rgba(14, 159, 110, 0.24)',
   warning: '#C56A12',
   warningBg: 'rgba(197, 106, 18, 0.14)',
+  warningBorder: 'rgba(197, 106, 18, 0.24)',
   error: '#D92D20',
   errorBg: 'rgba(217, 45, 32, 0.10)',
+  errorBorder: 'rgba(217, 45, 32, 0.24)',
   shadow: '#0F1F36',
   overlayBackdrop: 'rgba(15, 31, 54, 0.20)',
   white: '#FFFFFF',
@@ -199,7 +263,7 @@ function createTypography(colors: AppColors, fonts: AppFontFamilies): AppTypogra
     largeTitle: {
       fontSize: 24,
       color: colors.textPrimary,
-      letterSpacing: -0.3,
+      letterSpacing: 0,
       ...withWeightedFamily(fonts.bold, '700'),
     },
     headline: {
@@ -240,9 +304,15 @@ export function resolveThemeMode(
 
 export function createAppTheme(
   mode: ThemeMode,
-  fontPreference: FontPreference = DEFAULT_FONT_PREFERENCE
+  fontPreference: FontPreference = DEFAULT_FONT_PREFERENCE,
+  darkUiPalette: DarkUiPalette = 'classic'
 ): AppTheme {
-  const colors = mode === 'light' ? lightColors : darkColors;
+  const colors =
+    mode === 'light'
+      ? lightColors
+      : darkUiPalette === 'grey'
+        ? darkGreyColors
+        : darkClassicColors;
   const isDark = mode === 'dark';
   const fonts = getFontFamilies(fontPreference);
   return {
@@ -268,7 +338,7 @@ export function createAppTheme(
   };
 }
 
-const fallbackTheme = createAppTheme('dark');
+const fallbackTheme = createAppTheme('dark', DEFAULT_FONT_PREFERENCE, 'classic');
 export const colors: AppColors = { ...fallbackTheme.colors };
 export const typography: AppTypography = { ...fallbackTheme.typography };
 

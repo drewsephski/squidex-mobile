@@ -1,4 +1,5 @@
 import {
+  isGeneratedCursorThreadTitle,
   mapChat,
   mapChatSummary,
   readString,
@@ -6,9 +7,10 @@ import {
   type RawThread,
   toRawThread,
 } from './chatMapping';
-import { readAccountSnapshot } from './account';
+import { readAccountLoginStartResponse, readAccountSnapshot } from './account';
 import { readAccountRateLimits as readSelectedAccountRateLimits } from './rateLimits';
 import type {
+  AccountLoginStartResponse,
   AccountSnapshot,
   AccountRateLimitSnapshot,
   ApprovalPolicy,
@@ -16,32 +18,43 @@ import type {
   BrowserPreviewDiscoveryResponse,
   BrowserPreviewSession,
   BridgeCapabilities,
+  BridgeStatus,
   BridgeThreadQueueActionResponse,
   BridgeThreadQueueSendResponse,
   BridgeThreadQueueState,
+  DismissBridgeUiSurfaceResponse,
   BridgeRuntimeInfo,
   BridgeRestartStartResponse,
   BridgeUpdateStartResponse,
   ChatEngine,
+  CodexAppServerRestartResponse,
+  CursorCredentialStatus,
   CollaborationMode,
   CreateChatRequest,
   Chat,
   ChatSummary,
+  GitBranchesResponse,
   GitCloneRequest,
   GitCloneResponse,
   GitCommitRequest,
   GitCommitResponse,
   GitDiffResponse,
   GitHistoryResponse,
+  GitHubAuthGrantInput,
+  GitHubAuthInstallResponse,
   GitFileRequest,
   GitPushResponse,
   GitStageAllResponse,
   GitStageResponse,
   GitStatusResponse,
+  GitSwitchRequest,
+  GitSwitchResponse,
   GitUnstageAllResponse,
   GitUnstageResponse,
   PendingApproval,
   ResolveApprovalResponse,
+  ResolveBridgeUiSurfaceRequest,
+  ResolveBridgeUiSurfaceResponse,
   ResolveUserInputRequest,
   ResolveUserInputResponse,
   SendChatMessageRequest,
@@ -55,6 +68,7 @@ import type {
   ModelOption,
   ReasoningEffort,
   ModelReasoningEffortOption,
+  RpcNotification,
   ServiceTier,
   TerminalExecRequest,
   TerminalExecResponse,
@@ -76,6 +90,15 @@ interface ApiClientOptions {
 
 interface AppServerListResponse {
   data?: unknown[];
+  nextCursor?: string | null;
+  backwardsCursor?: string | null;
+  next_cursor?: string | null;
+  backwards_cursor?: string | null;
+}
+
+interface ThreadListStreamStartResponse {
+  streamId?: string;
+  started?: boolean;
 }
 
 interface AppServerLoadedThreadListResponse {
@@ -117,7 +140,7 @@ interface AppServerAccountReadResponse {
 }
 
 interface AppServerCollaborationMode {
-  mode: 'plan' | 'default';
+  mode: 'plan' | 'default' | 'ask';
   settings: {
     model: string;
     reasoning_effort: ReasoningEffort | null;
@@ -128,6 +151,23 @@ interface AppServerCollaborationMode {
 interface AppServerThreadRuntimeSettings {
   model: string | null;
   effort: ReasoningEffort | null;
+}
+
+interface CursorCredentialStatusResponse {
+  configured?: boolean;
+  valid?: boolean | null;
+  source?: string | null;
+  apiKeyName?: string | null;
+  api_key_name?: string | null;
+  userEmail?: string | null;
+  user_email?: string | null;
+  createdAt?: string | null;
+  created_at?: string | null;
+  enabled?: boolean;
+  runtimeAvailable?: boolean;
+  runtime_available?: boolean;
+  active?: boolean;
+  error?: string | null;
 }
 
 type AppServerThreadSetNameResponse = Record<string, never>;
@@ -144,6 +184,11 @@ const CHAT_LIST_SOURCE_KINDS_WITH_SUBAGENTS = [
 const MOBILE_DEVELOPER_INSTRUCTIONS =
   'When you need clarification, call request_user_input instead of asking only in plain text. Provide 2-3 concise options whenever possible and use isOther when free-form input is appropriate.';
 const MOBILE_DEFAULT_SANDBOX = 'danger-full-access';
+const THREAD_LIST_STREAM_BATCH_METHOD = 'bridge/thread/list/stream/batch';
+const THREAD_LIST_STREAM_ERROR_METHOD = 'bridge/thread/list/stream/error';
+const DEFAULT_CHAT_SUMMARY_HYDRATION_CONCURRENCY = 4;
+const MAX_CHAT_SUMMARY_HYDRATION_CONCURRENCY = 8;
+const TRANSIENT_THREAD_READ_RETRY_DELAYS_MS = [50, 100, 200, 400, 800];
 
 interface ChatSnapshot {
   rawThread: RawThread;
@@ -198,7 +243,80 @@ export type SendOrQueueChatMessageResult =
 
 interface ListChatsOptions {
   includeSubAgents?: boolean;
+  limit?: number;
+  cacheTtlMs?: number;
+  forceRefresh?: boolean;
 }
+
+interface ChatListPageOptions extends ListChatsOptions {
+  cursor?: string | null;
+}
+
+interface ChatListPage {
+  chats: ChatSummary[];
+  nextCursor: string | null;
+  backwardsCursor: string | null;
+}
+
+interface ListAllChatsOptions {
+  includeSubAgents?: boolean;
+  pageLimit?: number;
+  cacheTtlMs?: number;
+  forceRefresh?: boolean;
+  onPage?: (chats: ChatSummary[], page: ChatListPage) => void;
+}
+
+interface ChatListStreamOptions {
+  includeSubAgents?: boolean;
+  limits?: number[];
+  delayMs?: number;
+}
+
+interface ChatListStreamBatch {
+  streamId: string;
+  limit: number;
+  done: boolean;
+  chats: ChatSummary[];
+}
+
+interface ChatListStreamController {
+  streamId: string;
+  cancel: () => void;
+}
+
+interface AccountRateLimitsReadOptions {
+  cacheTtlMs?: number;
+  forceRefresh?: boolean;
+}
+
+interface AccountReadOptions {
+  refreshToken?: boolean;
+}
+
+interface AccountLoginCompletedNotification {
+  loginId: string | null;
+  success: boolean;
+  error: string | null;
+}
+
+interface ChatReadOptions {
+  cacheTtlMs?: number;
+  forceRefresh?: boolean;
+}
+
+interface ChatSummariesReadOptions {
+  concurrency?: number;
+}
+
+interface CacheEntry<T> {
+  value: T;
+  loadedAt: number;
+}
+
+const DEFAULT_PREFETCH_CACHE_TTL_MS = 30_000;
+const DEFAULT_CHAT_LIST_LIMIT = 20;
+const DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT = 50;
+const CHAT_LIST_STREAM_INITIAL_LIMIT = 5;
 
 const ACTIVE_TURN_STATUSES = new Set([
   'inprogress',
@@ -212,6 +330,14 @@ const ACTIVE_TURN_STATUSES = new Set([
 export class HostBridgeApiClient {
   private readonly ws: HostBridgeWsClient;
   private readonly renamedTitles = new Map<string, string>();
+  private readonly chatListCache = new Map<string, CacheEntry<ChatSummary[]>>();
+  private readonly chatListInFlight = new Map<string, Promise<ChatSummary[]>>();
+  private readonly allChatListCache = new Map<string, CacheEntry<ChatSummary[]>>();
+  private readonly allChatListInFlight = new Map<string, Promise<ChatSummary[]>>();
+  private readonly chatCache = new Map<string, CacheEntry<Chat>>();
+  private readonly chatInFlight = new Map<string, Promise<Chat>>();
+  private accountRateLimitsCache: CacheEntry<AccountRateLimitSnapshot | null> | null = null;
+  private accountRateLimitsInFlight: Promise<AccountRateLimitSnapshot | null> | null = null;
 
   constructor(options: ApiClientOptions) {
     this.ws = options.ws;
@@ -221,12 +347,23 @@ export class HostBridgeApiClient {
     return this.ws.request<HealthResponse>('bridge/health/read');
   }
 
+  readBridgeStatus(): Promise<BridgeStatus> {
+    return this.ws.request<BridgeStatus>('bridge/status/read');
+  }
+
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
     return this.ws.request<BridgeCapabilities>('bridge/capabilities/read');
   }
 
   readBridgeRuntime(): Promise<BridgeRuntimeInfo> {
     return this.ws.request<BridgeRuntimeInfo>('bridge/runtime/read');
+  }
+
+  async readCursorCredentials(): Promise<CursorCredentialStatus> {
+    const response = await this.ws.request<CursorCredentialStatusResponse>(
+      'bridge/cursor/credentials/read'
+    );
+    return readCursorCredentialStatus(response);
   }
 
   startBridgeUpdate(version = 'latest'): Promise<BridgeUpdateStartResponse> {
@@ -239,28 +376,462 @@ export class HostBridgeApiClient {
     return this.ws.request<BridgeRestartStartResponse>('bridge/restart/start');
   }
 
-  async readAccountRateLimits(): Promise<AccountRateLimitSnapshot | null> {
-    const response = await this.ws.request<Record<string, unknown>>('account/rateLimits/read');
-    return readSelectedAccountRateLimits(response);
+  restartCodexAppServer(): Promise<CodexAppServerRestartResponse> {
+    return this.ws.request<CodexAppServerRestartResponse>('bridge/codex/app-server/restart');
   }
 
-  async readAccount(): Promise<AccountSnapshot> {
+  peekAccountRateLimits(): AccountRateLimitSnapshot | null {
+    return this.accountRateLimitsCache?.value ?? null;
+  }
+
+  rememberAccountRateLimits(snapshot: AccountRateLimitSnapshot | null): void {
+    this.accountRateLimitsCache = {
+      value: snapshot,
+      loadedAt: Date.now(),
+    };
+  }
+
+  primeAccountRateLimits(
+    options?: AccountRateLimitsReadOptions
+  ): Promise<AccountRateLimitSnapshot | null> {
+    return this.readAccountRateLimits({
+      cacheTtlMs: DEFAULT_PREFETCH_CACHE_TTL_MS,
+      ...options,
+    });
+  }
+
+  async readAccountRateLimits(
+    options: AccountRateLimitsReadOptions = {}
+  ): Promise<AccountRateLimitSnapshot | null> {
+    const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
+    if (!options.forceRefresh && cacheTtlMs > 0 && this.accountRateLimitsCache) {
+      const ageMs = Date.now() - this.accountRateLimitsCache.loadedAt;
+      if (ageMs <= cacheTtlMs) {
+        return this.accountRateLimitsCache.value;
+      }
+    }
+
+    if (this.accountRateLimitsInFlight) {
+      return this.accountRateLimitsInFlight;
+    }
+
+    const request = this.ws
+      .request<Record<string, unknown>>('account/rateLimits/read')
+      .then((response) => {
+        const snapshot = readSelectedAccountRateLimits(response);
+        this.rememberAccountRateLimits(snapshot);
+        return snapshot;
+      })
+      .finally(() => {
+        this.accountRateLimitsInFlight = null;
+      });
+
+    this.accountRateLimitsInFlight = request;
+    return request;
+  }
+
+  async readAccount(options: AccountReadOptions = {}): Promise<AccountSnapshot> {
     const response = await this.ws.request<AppServerAccountReadResponse>('account/read', {
-      refreshToken: false,
+      refreshToken: options.refreshToken === true,
     });
     return readAccountSnapshot(response);
+  }
+
+  async startChatGptAccountLogin(): Promise<AccountLoginStartResponse> {
+    const response = await this.ws.request<Record<string, unknown>>('account/login/start', {
+      type: 'chatgpt',
+      codexStreamlinedLogin: true,
+    });
+    return readAccountLoginStartResponse(response);
+  }
+
+  async startChatGptDeviceCodeAccountLogin(): Promise<AccountLoginStartResponse> {
+    const response = await this.ws.request<Record<string, unknown>>('account/login/start', {
+      type: 'chatgptDeviceCode',
+    });
+    return readAccountLoginStartResponse(response);
+  }
+
+  async forwardCodexAuthCallback(callbackUrl: string): Promise<void> {
+    await this.ws.request('bridge/codex/auth/callback/forward', {
+      callbackUrl,
+    });
+  }
+
+  async waitForAccountLoginCompleted(
+    loginId: string | null,
+    timeoutMs = 90_000
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let unsubscribe = () => {};
+      const finish = (error?: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        unsubscribe();
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      };
+
+      timeout = setTimeout(() => {
+        finish(new Error('Codex login did not finish. Return here after ChatGPT confirms login.'));
+      }, timeoutMs);
+
+      unsubscribe = this.ws.onEvent((event: RpcNotification) => {
+        if (event.method !== 'account/login/completed') {
+          return;
+        }
+
+        const completion = readAccountLoginCompletedNotification(event.params);
+        if (!completion) {
+          return;
+        }
+
+        if (loginId && completion.loginId && completion.loginId !== loginId) {
+          return;
+        }
+
+        if (!completion.success) {
+          finish(new Error(completion.error ?? 'Codex login did not complete.'));
+          return;
+        }
+
+        finish();
+      });
+    });
+  }
+
+  async loginWithChatGptAuthTokens(input: {
+    accessToken: string;
+    chatgptAccountId: string;
+    chatgptPlanType?: string | null;
+  }): Promise<AccountLoginStartResponse> {
+    const response = await this.ws.request<Record<string, unknown>>('account/login/start', {
+      type: 'chatgptAuthTokens',
+      accessToken: input.accessToken,
+      chatgptAccountId: input.chatgptAccountId,
+      chatgptPlanType: input.chatgptPlanType ?? null,
+    });
+    return readAccountLoginStartResponse(response);
+  }
+
+  async cancelAccountLogin(loginId: string): Promise<void> {
+    await this.ws.request('account/login/cancel', { loginId });
   }
 
   async logoutAccount(): Promise<void> {
     await this.ws.request('account/logout');
   }
 
-  async listChats(options?: ListChatsOptions): Promise<ChatSummary[]> {
+  peekChats(options: ListChatsOptions = {}): ChatSummary[] | null {
+    const cached = this.chatListCache.get(this.chatListCacheKey(options));
+    return cached ? cloneChatSummaries(cached.value) : null;
+  }
+
+  rememberChats(chats: ChatSummary[], options: ListChatsOptions = {}): void {
+    this.chatListCache.set(this.chatListCacheKey(options), {
+      value: cloneChatSummaries(chats),
+      loadedAt: Date.now(),
+    });
+
+    if (chats.length > 0) {
+      this.mergeIntoAllChatListCaches(chats);
+    }
+  }
+
+  peekAllChats(options: ListAllChatsOptions = {}): ChatSummary[] | null {
+    const cached = this.allChatListCache.get(this.allChatListCacheKey(options));
+    return cached ? cloneChatSummaries(cached.value) : null;
+  }
+
+  rememberAllChats(chats: ChatSummary[], options: ListAllChatsOptions = {}): void {
+    this.allChatListCache.set(this.allChatListCacheKey(options), {
+      value: cloneChatSummaries(chats),
+      loadedAt: Date.now(),
+    });
+  }
+
+  peekChat(id: string): Chat | null {
+    const cached = this.chatCache.get(id.trim());
+    return cached ? cloneChat(cached.value) : null;
+  }
+
+  peekChatSummary(id: string): ChatSummary | null {
+    const threadId = id.trim();
+    if (!threadId) {
+      return null;
+    }
+
+    const cachedChat = this.chatCache.get(threadId);
+    if (cachedChat) {
+      return cloneChatSummary(cachedChat.value);
+    }
+
+    for (const cachedList of this.chatListCache.values()) {
+      const match = cachedList.value.find((chat) => chat.id === threadId);
+      if (match) {
+        return cloneChatSummary(match);
+      }
+    }
+
+    for (const cachedList of this.allChatListCache.values()) {
+      const match = cachedList.value.find((chat) => chat.id === threadId);
+      if (match) {
+        return cloneChatSummary(match);
+      }
+    }
+
+    return null;
+  }
+
+  peekChatShell(id: string): Chat | null {
+    const cachedChat = this.peekChat(id);
+    if (cachedChat) {
+      return cachedChat;
+    }
+
+    const summary = this.peekChatSummary(id);
+    return summary ? chatShellFromSummary(summary) : null;
+  }
+
+  rememberChat(chat: Chat): void {
+    const cloned = cloneChat(chat);
+    this.chatCache.set(chat.id, {
+      value: cloned,
+      loadedAt: Date.now(),
+    });
+
+    for (const [key, cachedList] of this.chatListCache.entries()) {
+      const index = cachedList.value.findIndex((entry) => entry.id === chat.id);
+      if (index < 0) {
+        continue;
+      }
+
+      const nextList = cloneChatSummaries(cachedList.value);
+      nextList[index] = cloneChatSummary(chat);
+      this.chatListCache.set(key, {
+        value: nextList,
+        loadedAt: cachedList.loadedAt,
+      });
+    }
+
+    for (const [key, cachedList] of this.allChatListCache.entries()) {
+      const index = cachedList.value.findIndex((entry) => entry.id === chat.id);
+      if (index < 0) {
+        continue;
+      }
+
+      const nextList = cloneChatSummaries(cachedList.value);
+      nextList[index] = cloneChatSummary(chat);
+      this.allChatListCache.set(key, {
+        value: nextList,
+        loadedAt: cachedList.loadedAt,
+      });
+    }
+  }
+
+  primeChats(options: ListChatsOptions = {}): Promise<ChatSummary[]> {
+    return this.listChats({
+      cacheTtlMs: DEFAULT_PREFETCH_CACHE_TTL_MS,
+      ...options,
+    });
+  }
+
+  async listChats(options: ListChatsOptions = {}): Promise<ChatSummary[]> {
+    const cacheKey = this.chatListCacheKey(options);
+    const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
+    const cached = this.chatListCache.get(cacheKey);
+    if (!options.forceRefresh && cacheTtlMs > 0 && cached) {
+      const ageMs = Date.now() - cached.loadedAt;
+      if (ageMs <= cacheTtlMs) {
+        return cloneChatSummaries(cached.value);
+      }
+    }
+
+    const inFlight = this.chatListInFlight.get(cacheKey);
+    if (inFlight) {
+      return cloneChatSummaries(await inFlight);
+    }
+
+    const request = this.fetchChats(options).finally(() => {
+      this.chatListInFlight.delete(cacheKey);
+    });
+
+    this.chatListInFlight.set(cacheKey, request);
+    return cloneChatSummaries(await request);
+  }
+
+  async listAllChats(options: ListAllChatsOptions = {}): Promise<ChatSummary[]> {
+    const cacheKey = this.allChatListCacheKey(options);
+    const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
+    const cached = this.allChatListCache.get(cacheKey);
+    if (!options.forceRefresh && cacheTtlMs > 0 && cached) {
+      const ageMs = Date.now() - cached.loadedAt;
+      if (ageMs <= cacheTtlMs) {
+        return cloneChatSummaries(cached.value);
+      }
+    }
+
+    const inFlight = this.allChatListInFlight.get(cacheKey);
+    if (inFlight) {
+      return cloneChatSummaries(await inFlight);
+    }
+
+    const request = this.fetchAllChats(options).finally(() => {
+      this.allChatListInFlight.delete(cacheKey);
+    });
+    this.allChatListInFlight.set(cacheKey, request);
+    return cloneChatSummaries(await request);
+  }
+
+  async startChatListStream(
+    options: ChatListStreamOptions = {},
+    onBatch: (batch: ChatListStreamBatch) => void,
+    onError?: (error: Error) => void
+  ): Promise<ChatListStreamController> {
+    const includeSubAgents = options.includeSubAgents === true;
+    const limits = normalizeChatListStreamLimits(
+      options.limits,
+      includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT
+    );
+    const streamId = `mobile-thread-list-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    let closed = false;
+
+    const unsubscribe = this.ws.onEvent((event: RpcNotification) => {
+      const params = toRecord(event.params);
+      if (!params || readString(params.streamId) !== streamId) {
+        return;
+      }
+
+      if (event.method === THREAD_LIST_STREAM_ERROR_METHOD) {
+        closed = true;
+        unsubscribe();
+        onError?.(new Error(readString(params.error) ?? 'thread list stream failed'));
+        return;
+      }
+
+      if (event.method !== THREAD_LIST_STREAM_BATCH_METHOD) {
+        return;
+      }
+
+      const limit = normalizeListLimit(params.limit);
+      const rawList = Array.isArray(params.data) ? params.data : [];
+      const chats = this.mapChatListItems(rawList, includeSubAgents);
+      this.rememberChats(chats, {
+        includeSubAgents,
+        limit,
+      });
+
+      onBatch({
+        streamId,
+        limit,
+        done: params.done === true,
+        chats,
+      });
+
+      if (params.done === true) {
+        closed = true;
+        unsubscribe();
+      }
+    });
+
+    const cancel = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      unsubscribe();
+      void this.ws
+        .request('bridge/thread/list/stream/cancel', {
+          streamId,
+        })
+        .catch(() => {});
+    };
+
+    try {
+      const response = await this.ws.request<ThreadListStreamStartResponse>(
+        'bridge/thread/list/stream/start',
+        {
+          streamId,
+          includeSubAgents,
+          limits,
+          delayMs:
+            typeof options.delayMs === 'number' && Number.isFinite(options.delayMs)
+              ? Math.max(0, Math.round(options.delayMs))
+              : undefined,
+        }
+      );
+      if (readString(response.streamId) !== streamId || response.started === false) {
+        cancel();
+        throw new Error('thread list stream did not start');
+      }
+    } catch (error) {
+      cancel();
+      throw error;
+    }
+
+    return {
+      streamId,
+      cancel,
+    };
+  }
+
+  private async fetchChats(options: ListChatsOptions): Promise<ChatSummary[]> {
+    const page = await this.fetchChatPage(options);
+    this.rememberChats(page.chats, options);
+    return page.chats;
+  }
+
+  private async fetchAllChats(options: ListAllChatsOptions): Promise<ChatSummary[]> {
+    const includeSubAgents = options.includeSubAgents === true;
+    const pageLimit = normalizeListLimit(
+      options.pageLimit ??
+        (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT)
+    );
+    let cursor: string | null = null;
+    let chats: ChatSummary[] = [];
+
+    do {
+      const page = await this.fetchChatPage({
+        includeSubAgents,
+        limit: pageLimit,
+        cursor,
+        forceRefresh: true,
+      });
+      chats = mergeChatSummariesById(chats, page.chats);
+      if (options.onPage) {
+        options.onPage(cloneChatSummaries(chats), {
+          ...page,
+          chats: cloneChatSummaries(page.chats),
+        });
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    this.rememberAllChats(chats, options);
+    return chats;
+  }
+
+  private async fetchChatPage(options: ChatListPageOptions): Promise<ChatListPage> {
     const includeSubAgents = options?.includeSubAgents === true;
+    const limit = normalizeListLimit(
+      options.limit ?? (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT)
+    );
     const response = await this.ws.request<AppServerListResponse>('thread/list', {
-      cursor: null,
-      limit: 200,
-      sortKey: null,
+      cursor: normalizeCursor(options.cursor),
+      limit,
+      sortKey: 'updated_at',
       modelProviders: null,
       sourceKinds: includeSubAgents
         ? CHAT_LIST_SOURCE_KINDS_WITH_SUBAGENTS
@@ -270,32 +841,54 @@ export class HostBridgeApiClient {
     });
 
     const listRaw = Array.isArray(response.data) ? response.data : [];
+    const chats = this.mapChatListItems(listRaw, includeSubAgents);
 
+    return {
+      chats,
+      nextCursor:
+        readString(response.nextCursor) ?? readString(response.next_cursor) ?? null,
+      backwardsCursor:
+        readString(response.backwardsCursor) ?? readString(response.backwards_cursor) ?? null,
+    };
+  }
+
+  private mapChatListItems(listRaw: unknown[], includeSubAgents: boolean): ChatSummary[] {
     return listRaw
       .map((item) => {
         const rawThread = toRawThread(item);
-        if (rawThread.id && rawThread.name?.trim()) {
-          this.renamedTitles.set(rawThread.id, rawThread.name.trim());
-        }
+        this.rememberRawThreadTitle(rawThread);
 
         const mapped = mapChatSummary(rawThread);
         if (!mapped) {
           return null;
         }
 
-        const cachedTitle = this.renamedTitles.get(mapped.id);
-        if (cachedTitle) {
-          return {
-            ...mapped,
-            title: cachedTitle,
-          };
-        }
-
-        return mapped;
+        return this.applyRememberedTitle(mapped);
       })
       .filter((item): item is ChatSummary => item !== null)
       .filter((item) => includeSubAgents || !isSubAgentSource(item.sourceKind))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  private chatListCacheKey(options: ListChatsOptions): string {
+    const includeSubAgents = options.includeSubAgents === true;
+    const limit = normalizeListLimit(
+      options.limit ?? (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT)
+    );
+    return `${includeSubAgents ? 'with-subagents' : 'default'}:${String(limit)}`;
+  }
+
+  private allChatListCacheKey(options: ListAllChatsOptions): string {
+    return options.includeSubAgents === true ? 'with-subagents' : 'default';
+  }
+
+  private mergeIntoAllChatListCaches(chats: ChatSummary[]): void {
+    for (const [key, cachedList] of this.allChatListCache.entries()) {
+      this.allChatListCache.set(key, {
+        value: mergeChatSummariesById(cachedList.value, chats),
+        loadedAt: cachedList.loadedAt,
+      });
+    }
   }
 
   async listLoadedChatIds(): Promise<string[]> {
@@ -319,11 +912,15 @@ export class HostBridgeApiClient {
   async listFilesystemEntries(
     request?: FileSystemListRequest
   ): Promise<FileSystemListResponse> {
-    const response = await this.ws.request<Record<string, unknown>>('bridge/fs/list', {
+    const params: Record<string, unknown> = {
       path: normalizeCwd(request?.path) ?? null,
       includeHidden: request?.includeHidden === true,
       directoriesOnly: request?.directoriesOnly !== false,
-    });
+    };
+    if (request?.includeGitRepo === true) {
+      params.includeGitRepo = true;
+    }
+    const response = await this.ws.request<Record<string, unknown>>('bridge/fs/list', params);
     return readFileSystemListResponse(response);
   }
 
@@ -414,35 +1011,94 @@ export class HostBridgeApiClient {
     return this.getChat(chatId);
   }
 
-  async getChat(id: string): Promise<Chat> {
-    const snapshot = await this.readChatSnapshot(id);
-    return snapshot.chat;
+  async getChat(id: string, options: ChatReadOptions = {}): Promise<Chat> {
+    const threadId = id.trim();
+    const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
+    const cached = this.chatCache.get(threadId);
+    if (!options.forceRefresh && cacheTtlMs > 0 && cached) {
+      const ageMs = Date.now() - cached.loadedAt;
+      if (ageMs <= cacheTtlMs) {
+        return cloneChat(cached.value);
+      }
+    }
+
+    const inFlight = this.chatInFlight.get(threadId);
+    if (inFlight) {
+      return cloneChat(await inFlight);
+    }
+
+    const request = this.readChatSnapshot(threadId)
+      .then((snapshot) => {
+        this.rememberChat(snapshot.chat);
+        return snapshot.chat;
+      })
+      .finally(() => {
+        this.chatInFlight.delete(threadId);
+      });
+
+    this.chatInFlight.set(threadId, request);
+    return cloneChat(await request);
   }
 
   async getChatSummary(id: string): Promise<ChatSummary> {
-    const response = await this.ws.request<AppServerReadResponse>('thread/read', {
-      threadId: id,
-      includeTurns: false,
-    });
+    const response = await this.readAppServerThread(id, false);
     const rawThread = toRawThread(response.thread);
-    if (rawThread.id && rawThread.name?.trim()) {
-      this.renamedTitles.set(rawThread.id, rawThread.name.trim());
-    }
+    this.rememberRawThreadTitle(rawThread);
 
     const mapped = mapChatSummary(rawThread);
     if (!mapped) {
       throw new Error('chat id missing in app-server response');
     }
 
-    const cachedTitle = this.renamedTitles.get(mapped.id);
-    if (!cachedTitle) {
-      return mapped;
+    const summary = this.applyRememberedTitle(mapped);
+    const cachedChat = this.peekChat(summary.id);
+    this.rememberChat(
+      cachedChat
+        ? {
+            ...cachedChat,
+            ...summary,
+            messages: cachedChat.messages,
+          }
+        : chatShellFromSummary(summary)
+    );
+
+    return summary;
+  }
+
+  async getChatSummaries(
+    ids: readonly string[],
+    options: ChatSummariesReadOptions = {}
+  ): Promise<ChatSummary[]> {
+    const uniqueIds = normalizeUniqueThreadIds(ids);
+    if (uniqueIds.length === 0) {
+      return [];
     }
 
-    return {
-      ...mapped,
-      title: cachedTitle,
-    };
+    const concurrency = normalizeConcurrency(
+      options.concurrency,
+      DEFAULT_CHAT_SUMMARY_HYDRATION_CONCURRENCY,
+      MAX_CHAT_SUMMARY_HYDRATION_CONCURRENCY
+    );
+    const results: Array<ChatSummary | null> = Array(uniqueIds.length).fill(null);
+    let nextIndex = 0;
+
+    const workers = Array.from(
+      { length: Math.min(concurrency, uniqueIds.length) },
+      async () => {
+        while (nextIndex < uniqueIds.length) {
+          const index = nextIndex;
+          nextIndex += 1;
+          try {
+            results[index] = await this.getChatSummary(uniqueIds[index]);
+          } catch {
+            results[index] = null;
+          }
+        }
+      }
+    );
+
+    await Promise.all(workers);
+    return results.filter((summary): summary is ChatSummary => summary !== null);
   }
 
   async renameChat(id: string, name: string): Promise<Chat> {
@@ -786,6 +1442,9 @@ export class HostBridgeApiClient {
       const description = readString(record.description) ?? undefined;
       const providerId = readString(record.providerId) ?? readString(record.providerID);
       const providerName = readString(record.providerName);
+      const contextWindow = readPositiveIntegerLike(
+        record.contextWindow ?? record.modelContextWindow ?? record.model_context_window
+      );
       const connected =
         typeof record.connected === 'boolean' ? record.connected : undefined;
       const authRequired =
@@ -810,6 +1469,7 @@ export class HostBridgeApiClient {
         description,
         providerId: providerId ?? undefined,
         providerName: providerName ?? undefined,
+        contextWindow: contextWindow ?? undefined,
         connected,
         authRequired,
         hidden,
@@ -902,8 +1562,68 @@ export class HostBridgeApiClient {
     });
   }
 
+  resolveBridgeUiSurface(
+    id: string,
+    body: ResolveBridgeUiSurfaceRequest
+  ): Promise<ResolveBridgeUiSurfaceResponse> {
+    return this.ws.request<ResolveBridgeUiSurfaceResponse>('bridge/ui/resolve', {
+      id,
+      threadId: body.threadId,
+      turnId: body.turnId ?? null,
+      actionId: body.actionId,
+    });
+  }
+
+  dismissBridgeUiSurface(
+    id: string,
+    threadId?: string | null
+  ): Promise<DismissBridgeUiSurfaceResponse> {
+    return this.ws.request<DismissBridgeUiSurfaceResponse>('bridge/ui/dismiss', {
+      id,
+      threadId: threadId ?? null,
+    });
+  }
+
   execTerminal(body: TerminalExecRequest): Promise<TerminalExecResponse> {
     return this.ws.request<TerminalExecResponse>('bridge/terminal/exec', body);
+  }
+
+  installGitHubAuth(
+    body:
+      | {
+          accessToken: string;
+          repositories?: string[];
+        }
+      | {
+          grants: GitHubAuthGrantInput[];
+        }
+  ): Promise<GitHubAuthInstallResponse> {
+    const grants =
+      'grants' in body
+        ? body.grants
+        : [
+            {
+              accessToken: body.accessToken,
+              repositories: body.repositories ?? [],
+            },
+          ];
+
+    const normalizedGrants = grants
+      .map((grant) => ({
+        accessToken: grant.accessToken.trim(),
+        repositories: (grant.repositories ?? [])
+          .map((repository) => repository.trim())
+          .filter((repository) => repository.length > 0),
+      }))
+      .filter((grant) => grant.accessToken.length > 0);
+
+    if (normalizedGrants.length === 0) {
+      return Promise.reject(new Error('At least one GitHub auth grant is required'));
+    }
+
+    return this.ws.request<GitHubAuthInstallResponse>('bridge/github/auth/install', {
+      grants: normalizedGrants,
+    });
   }
 
   gitStatus(cwd?: string): Promise<GitStatusResponse> {
@@ -925,6 +1645,13 @@ export class HostBridgeApiClient {
     return this.ws.request<GitHistoryResponse>('bridge/git/history', {
       cwd: normalizedCwd ?? null,
       limit,
+    });
+  }
+
+  gitBranches(cwd?: string): Promise<GitBranchesResponse> {
+    const normalizedCwd = normalizeCwd(cwd);
+    return this.ws.request<GitBranchesResponse>('bridge/git/branches', {
+      cwd: normalizedCwd ?? null,
     });
   }
 
@@ -990,6 +1717,18 @@ export class HostBridgeApiClient {
     });
   }
 
+  gitSwitch(body: GitSwitchRequest): Promise<GitSwitchResponse> {
+    const branch = body.branch.trim();
+    if (!branch) {
+      return Promise.reject(new Error('branch must not be empty'));
+    }
+
+    return this.ws.request<GitSwitchResponse>('bridge/git/switch', {
+      branch,
+      cwd: normalizeCwd(body.cwd) ?? null,
+    });
+  }
+
   gitPush(cwd?: string): Promise<GitPushResponse> {
     const normalizedCwd = normalizeCwd(cwd);
     return this.ws.request<GitPushResponse>('bridge/git/push', {
@@ -1019,7 +1758,11 @@ export class HostBridgeApiClient {
       throw new Error('Only user role is supported in bridge/chat messaging');
     }
 
-    const normalizedCwd = normalizeCwd(body.cwd);
+    const cachedSummary = this.peekChatSummary(id);
+    const cachedCursorCwd =
+      cachedSummary?.engine === 'cursor' ? normalizeCwd(cachedSummary.cwd) : null;
+    const normalizedCwd = normalizeCwd(body.cwd) ?? cachedCursorCwd;
+    const cachedEngine = normalizeChatEngine(cachedSummary?.engine);
     const normalizedModel = normalizeModel(body.model);
     const normalizedEffort = normalizeEffort(body.effort);
     const normalizedServiceTier = normalizeServiceTier(body.serviceTier);
@@ -1044,7 +1787,10 @@ export class HostBridgeApiClient {
     let effectiveModel = normalizedModel ?? resumedThreadSettings?.model ?? null;
     if (requestedCollaborationMode && !effectiveModel && !options?.skipResume) {
       try {
-        const models = await this.listModels(false);
+        const models = await this.listModels(false, {
+          threadId: id,
+          ...(cachedEngine ? { engine: cachedEngine } : {}),
+        });
         effectiveModel =
           models.find((entry) => entry.isDefault)?.id ?? models[0]?.id ?? null;
       } catch {
@@ -1059,7 +1805,8 @@ export class HostBridgeApiClient {
     const normalizedCollaborationMode = toTurnCollaborationMode(
       requestedCollaborationMode,
       effectiveModel,
-      effectiveEffort
+      effectiveEffort,
+      cachedEngine
     );
 
     return {
@@ -1085,13 +1832,47 @@ export class HostBridgeApiClient {
 
   private mapChatWithCachedTitle(rawThreadValue: unknown): Chat {
     const rawThread = toRawThread(rawThreadValue);
-    if (rawThread.id && rawThread.name?.trim()) {
-      this.renamedTitles.set(rawThread.id, rawThread.name.trim());
-    }
+    this.rememberRawThreadTitle(rawThread);
 
     const mapped = mapChat(rawThread);
+    const chat = this.applyRememberedTitle(mapped);
+    this.rememberChat(chat);
+    return chat;
+  }
+
+  private rememberRawThreadTitle(rawThread: RawThread): void {
+    const threadId = rawThread.id?.trim();
+    const rawTitle = rawThread.name?.trim();
+    if (!threadId || !rawTitle) {
+      return;
+    }
+
+    if (isGeneratedCursorThreadTitle(rawTitle, threadId, rawThread.engine)) {
+      const cachedTitle = this.renamedTitles.get(threadId);
+      if (isGeneratedCursorThreadTitle(cachedTitle, threadId, rawThread.engine)) {
+        this.renamedTitles.delete(threadId);
+      }
+      return;
+    }
+
+    this.renamedTitles.set(threadId, rawTitle);
+  }
+
+  private applyRememberedTitle<T extends ChatSummary>(mapped: T): T {
     const cachedTitle = this.renamedTitles.get(mapped.id);
     if (!cachedTitle) {
+      return mapped;
+    }
+
+    if (isGeneratedCursorThreadTitle(cachedTitle, mapped.id, mapped.engine)) {
+      this.renamedTitles.delete(mapped.id);
+      return mapped;
+    }
+
+    if (
+      mapped.engine === 'cursor' &&
+      !isGeneratedCursorThreadTitle(mapped.title, mapped.id, mapped.engine)
+    ) {
       return mapped;
     }
 
@@ -1141,10 +1922,7 @@ export class HostBridgeApiClient {
 
   private async readChatSnapshot(id: string): Promise<ChatSnapshot> {
     try {
-      const response = await this.ws.request<AppServerReadResponse>('thread/read', {
-        threadId: id,
-        includeTurns: true,
-      });
+      const response = await this.readAppServerThread(id, true);
       const rawThread = toRawThread(response.thread);
       return {
         rawThread,
@@ -1155,16 +1933,44 @@ export class HostBridgeApiClient {
         throw error;
       }
 
-      const response = await this.ws.request<AppServerReadResponse>('thread/read', {
-        threadId: id,
-        includeTurns: false,
-      });
+      const response = await this.readAppServerThread(id, false);
       const rawThread = toRawThread(response.thread);
       return {
         rawThread,
         chat: this.mapChatWithCachedTitle(rawThread),
       };
     }
+  }
+
+  private async readAppServerThread(
+    threadId: string,
+    includeTurns: boolean
+  ): Promise<AppServerReadResponse> {
+    let lastTransientError: unknown = null;
+    for (let attempt = 0; attempt <= TRANSIENT_THREAD_READ_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        const cachedSummary = this.peekChatSummary(threadId);
+        const cursorCwd =
+          cachedSummary?.engine === 'cursor' ? normalizeCwd(cachedSummary.cwd) : null;
+        return await this.ws.request<AppServerReadResponse>('thread/read', {
+          threadId,
+          includeTurns,
+          ...(cursorCwd ? { cwd: cursorCwd } : {}),
+        });
+      } catch (error) {
+        if (!isTransientThreadReadError(error)) {
+          throw error;
+        }
+        lastTransientError = error;
+        const retryDelayMs = TRANSIENT_THREAD_READ_RETRY_DELAYS_MS[attempt];
+        if (retryDelayMs === undefined) {
+          throw error;
+        }
+        await sleep(retryDelayMs);
+      }
+    }
+
+    throw lastTransientError;
   }
 
   private async getChatWithUserMessage(
@@ -1193,6 +1999,7 @@ export class HostBridgeApiClient {
       !rawThreadHasTurns(latestSnapshot.rawThread) &&
       chatHasRecentUserMessage(latest, normalizedContent, mentions, localImages);
     if (hasMatchingTurnMessage || hasFallbackRecentMessage) {
+      this.rememberChat(latest);
       return latest;
     }
 
@@ -1213,11 +2020,19 @@ export class HostBridgeApiClient {
         !rawThreadHasTurns(latestSnapshot.rawThread) &&
         chatHasRecentUserMessage(latest, normalizedContent, mentions, localImages);
       if (matchedAfterRetry || matchedByFallback) {
+        this.rememberChat(latest);
         return latest;
       }
     }
 
-    return appendSyntheticUserMessage(latest, normalizedContent, mentions, localImages);
+    const synthetic = appendSyntheticUserMessage(
+      latest,
+      normalizedContent,
+      mentions,
+      localImages
+    );
+    this.rememberChat(synthetic);
+    return synthetic;
   }
 }
 
@@ -1231,6 +2046,70 @@ function normalizeCwd(cwd: string | null | undefined): string | null {
   }
   const trimmed = cwd.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeListLimit(limit: unknown): number {
+  return typeof limit === 'number' && Number.isFinite(limit)
+    ? Math.max(1, Math.min(200, Math.round(limit)))
+    : DEFAULT_CHAT_LIST_LIMIT;
+}
+
+function normalizeCursor(cursor: unknown): string | null {
+  if (typeof cursor !== 'string') {
+    return null;
+  }
+  const trimmed = cursor.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeUniqueThreadIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== 'string') {
+      continue;
+    }
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return normalized;
+}
+
+function normalizeConcurrency(value: unknown, fallback: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(1, Math.min(max, Math.round(value)))
+    : fallback;
+}
+
+function normalizeChatListStreamLimits(limits: unknown, fallbackLimit: number): number[] {
+  const rawLimits = Array.isArray(limits) ? limits : [CHAT_LIST_STREAM_INITIAL_LIMIT, fallbackLimit];
+  const normalized: number[] = [];
+  for (const limit of rawLimits) {
+    const nextLimit = normalizeListLimit(limit);
+    if (!normalized.includes(nextLimit)) {
+      normalized.push(nextLimit);
+    }
+  }
+
+  return normalized.length > 0 ? normalized : [normalizeListLimit(fallbackLimit)];
+}
+
+function mergeChatSummariesById(
+  previous: ChatSummary[],
+  incoming: ChatSummary[]
+): ChatSummary[] {
+  const byId = new Map<string, ChatSummary>();
+  for (const chat of previous) {
+    byId.set(chat.id, chat);
+  }
+  for (const chat of incoming) {
+    byId.set(chat.id, chat);
+  }
+  return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function readTimestampIso(value: unknown): string | null {
@@ -1254,6 +2133,21 @@ function readTimestampIso(value: unknown): string | null {
   }
 
   return null;
+}
+
+function readAccountLoginCompletedNotification(
+  value: unknown
+): AccountLoginCompletedNotification | null {
+  const record = toRecord(value);
+  if (!record || typeof record.success !== 'boolean') {
+    return null;
+  }
+
+  return {
+    loginId: readString(record.loginId) ?? readString(record.login_id),
+    success: record.success,
+    error: readString(record.error),
+  };
 }
 
 function readWorkspaceListResponse(value: unknown): WorkspaceListResponse {
@@ -1337,6 +2231,7 @@ function readBrowserPreviewSession(value: unknown): BrowserPreviewSession | null
   const sessionId = readString(record.sessionId)?.trim() ?? '';
   const targetUrl = readString(record.targetUrl)?.trim() ?? '';
   const bootstrapPath = readString(record.bootstrapPath)?.trim() ?? '';
+  const previewBaseUrl = readString(record.previewBaseUrl)?.trim() || null;
   const previewPortRaw = record.previewPort;
   const previewPort =
     typeof previewPortRaw === 'number'
@@ -1355,6 +2250,7 @@ function readBrowserPreviewSession(value: unknown): BrowserPreviewSession | null
     sessionId,
     targetUrl,
     previewPort,
+    ...(previewBaseUrl ? { previewBaseUrl } : {}),
     bootstrapPath,
     createdAt,
     lastAccessedAt: lastAccessedAt ?? createdAt,
@@ -1590,14 +2486,19 @@ function normalizeLocalImages(raw: LocalImageInput[] | undefined): TurnInputLoca
 function toTurnCollaborationMode(
   value: CollaborationMode | string | null | undefined,
   model: string | null,
-  effort: ReasoningEffort | null
+  effort: ReasoningEffort | null,
+  engine: ChatEngine | null
 ): AppServerCollaborationMode | null {
   if (typeof value !== 'string') {
     return null;
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized !== 'plan' && normalized !== 'default') {
+  if (normalized !== 'plan' && normalized !== 'default' && normalized !== 'ask') {
+    return null;
+  }
+
+  if (normalized === 'ask' && engine !== 'cursor') {
     return null;
   }
 
@@ -1623,7 +2524,7 @@ function normalizeCollaborationMode(
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'plan' || normalized === 'default') {
+  if (normalized === 'plan' || normalized === 'default' || normalized === 'ask') {
     return normalized;
   }
 
@@ -1636,7 +2537,7 @@ function normalizeChatEngine(value: string | null | undefined): ChatEngine | nul
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'codex' || normalized === 'opencode') {
+  if (normalized === 'codex' || normalized === 'opencode' || normalized === 'cursor') {
     return normalized;
   }
 
@@ -1650,6 +2551,26 @@ function readThreadRuntimeSettings(value: unknown): AppServerThreadRuntimeSettin
     effort: normalizeEffort(
       readString(record?.reasoningEffort) ?? readString(record?.reasoning_effort)
     ),
+  };
+}
+
+function readCursorCredentialStatus(value: unknown): CursorCredentialStatus {
+  const record = toRecord(value) ?? {};
+  const sourceRaw = readString(record.source);
+  const source = sourceRaw === 'env' ? sourceRaw : null;
+
+  return {
+    configured: record.configured === true,
+    valid: typeof record.valid === 'boolean' ? record.valid : null,
+    source,
+    apiKeyName: readString(record.apiKeyName) ?? readString(record.api_key_name),
+    userEmail: readString(record.userEmail) ?? readString(record.user_email),
+    createdAt: readString(record.createdAt) ?? readString(record.created_at),
+    enabled: record.enabled === true,
+    runtimeAvailable:
+      record.runtimeAvailable === true || record.runtime_available === true,
+    active: record.active === true,
+    error: readString(record.error),
   };
 }
 
@@ -1689,6 +2610,30 @@ function toReasoningEffortOptions(raw: unknown): ModelReasoningEffortOption[] {
   }
 
   return options;
+}
+
+function readPositiveIntegerLike(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const match = /^([0-9]+(?:\.[0-9]+)?)([km])?$/.exec(normalized);
+  if (!match) {
+    return null;
+  }
+
+  const numeric = Number(match[1]);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  const multiplier = match[2] === 'm' ? 1_000_000 : match[2] === 'k' ? 1_000 : 1;
+  return Math.floor(numeric * multiplier);
 }
 
 function chatHasRecentUserMessage(
@@ -1836,6 +2781,57 @@ function buildExpectedUserMessageContent(
     .join('\n');
 }
 
+function chatShellFromSummary(summary: ChatSummary): Chat {
+  return {
+    ...cloneChatSummary(summary),
+    messages: [],
+    latestPlan: null,
+    latestTurnPlan: null,
+    latestTurnStatus: null,
+    activeTurnId: null,
+  };
+}
+
+function cloneChatSummary(chat: ChatSummary): ChatSummary {
+  return { ...chat };
+}
+
+function cloneChatSummaries(chats: ChatSummary[]): ChatSummary[] {
+  return chats.map(cloneChatSummary);
+}
+
+function cloneChat(chat: Chat): Chat {
+  return {
+    ...chat,
+    messages: chat.messages.map((message) => ({
+      ...message,
+      subAgentMeta: message.subAgentMeta
+        ? {
+            ...message.subAgentMeta,
+            receiverThreadIds: message.subAgentMeta.receiverThreadIds
+              ? [...message.subAgentMeta.receiverThreadIds]
+              : undefined,
+          }
+        : undefined,
+    })),
+    latestPlan: cloneChatPlan(chat.latestPlan),
+    latestTurnPlan: cloneChatPlan(chat.latestTurnPlan),
+  };
+}
+
+function cloneChatPlan<T extends Chat['latestPlan'] | Chat['latestTurnPlan']>(
+  plan: T
+): T {
+  if (!plan) {
+    return plan;
+  }
+
+  return {
+    ...plan,
+    steps: plan.steps.map((step) => ({ ...step })),
+  } as T;
+}
+
 function appendSyntheticUserMessage(
   chat: Chat,
   content: string,
@@ -1873,5 +2869,15 @@ function isMaterializationGapError(error: unknown): boolean {
   return (
     message.includes('includeTurns') &&
     (message.includes('material') || message.includes('materialis'))
+  );
+}
+
+function isTransientThreadReadError(error: unknown): boolean {
+  const message = String((error as Error).message ?? error).toLowerCase();
+  return (
+    message.includes('failed to read thread') &&
+    message.includes('thread-store internal error') &&
+    message.includes('rollout') &&
+    message.includes('is empty')
   );
 }

@@ -101,6 +101,12 @@ export function ChatInput({
   const showVoiceRecordingUi = voiceState === 'recording';
   const showVoiceTranscribingUi = voiceState === 'transcribing';
   const showVoiceStatusUi = showVoiceRecordingUi || showVoiceTranscribingUi;
+  /** Cursor-style prominent circular submit control (not mic/stop). */
+  const submitUsesPrimaryChrome =
+    showSendButton &&
+    !canStop &&
+    voiceState !== 'recording' &&
+    voiceState !== 'transcribing';
   const shouldShowActionButton =
     canStop || showSendButton || showVoiceButton || voiceState !== 'idle';
   const composerBottomSpacing = resolveComposerBottomSpacing(
@@ -297,15 +303,22 @@ export function ChatInput({
                 {showSendButton ? (
                   <Pressable
                     onPress={canSend ? onSubmit : undefined}
-                    style={styles.sendBtn}
+                    style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
                     disabled={!canSend}
                     hitSlop={ACTION_BUTTON_HIT_SLOP}
                     pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
                   >
                     {isLoading && !canSend ? (
-                      <ActivityIndicator size="small" color={colors.textMuted} />
+                      <ActivityIndicator
+                        size="small"
+                        color={submitUsesPrimaryChrome ? colors.accentText : colors.textMuted}
+                      />
                     ) : (
-                      <Ionicons name="arrow-up" size={14} color={colors.textPrimary} />
+                      <Ionicons
+                        name="arrow-up"
+                        size={14}
+                        color={submitUsesPrimaryChrome ? colors.accentText : colors.textPrimary}
+                      />
                     )}
                   </Pressable>
                 ) : null}
@@ -378,11 +391,12 @@ const createStyles = (theme: AppTheme) =>
       flexShrink: 1,
     },
     plusBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: theme.colors.border,
+      backgroundColor: theme.colors.bgElevated,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -400,13 +414,13 @@ const createStyles = (theme: AppTheme) =>
       borderWidth: 1,
       borderColor: theme.colors.borderHighlight,
       borderRadius: theme.radius.lg,
-      paddingHorizontal: theme.spacing.md,
+      paddingHorizontal: theme.spacing.sm + 2,
       paddingVertical: 3,
-      minHeight: 38,
+      minHeight: 44,
       maxHeight: 120,
     },
     inputWrapperVoiceActive: {
-      minHeight: 54,
+      minHeight: 58,
       paddingVertical: theme.spacing.xs + 2,
     },
     input: {
@@ -422,7 +436,7 @@ const createStyles = (theme: AppTheme) =>
       opacity: 0,
       ...theme.typography.body,
       color: theme.colors.textPrimary,
-      left: theme.spacing.md,
+      left: theme.spacing.sm + 2,
       top: theme.spacing.xs,
     },
     voiceStatusContent: {
@@ -460,15 +474,18 @@ const createStyles = (theme: AppTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       marginLeft: theme.spacing.xs,
-      gap: theme.spacing.xs,
+      gap: theme.spacing.xs / 2,
     },
     sendBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: theme.colors.bgItem,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: theme.colors.bgElevated,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    sendBtnPrimary: {
+      backgroundColor: theme.colors.accent,
     },
     micBtnRecording: {
       borderWidth: 1.5,

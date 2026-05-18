@@ -137,6 +137,7 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
   const [suggestions, setSuggestions] = useState<BrowserPreviewTargetSuggestion[]>([]);
   const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
   const [supportsBrowserPreview, setSupportsBrowserPreview] = useState(true);
+  const submitDisabled = !supportsBrowserPreview || openingPreview;
   const [webReloadKey, setWebReloadKey] = useState(0);
   const [nativeReloadKey, setNativeReloadKey] = useState(0);
   const [bottomBarVisible, setBottomBarVisible] = useState(true);
@@ -156,7 +157,13 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
 
   const previewOrigin = useMemo(
     () =>
-      activeSession ? getBrowserPreviewOrigin(bridgeUrl, activeSession.previewPort) : null,
+      activeSession
+        ? getBrowserPreviewOrigin(
+            bridgeUrl,
+            activeSession.previewPort,
+            activeSession.previewBaseUrl ?? null
+          )
+        : null,
     [activeSession, bridgeUrl]
   );
   const currentShellRequestKey = useMemo(
@@ -353,7 +360,8 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
         bridgeUrl,
         session.previewPort,
         session.bootstrapPath,
-        viewport
+        viewport,
+        session.previewBaseUrl ?? null
       );
       if (!nextPreviewUrl) {
         throw new Error('Could not build preview bootstrap URL.');
@@ -955,17 +963,24 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
               ) : null}
               <Pressable
                 onPress={handleSubmitInput}
-                disabled={!supportsBrowserPreview || openingPreview}
+                disabled={submitDisabled}
                 style={({ pressed }) => [
                   styles.submitButton,
-                  (!supportsBrowserPreview || openingPreview) && styles.submitButtonDisabled,
+                  submitDisabled && styles.submitButtonDisabled,
                   pressed && supportsBrowserPreview && !openingPreview && styles.submitButtonPressed,
                 ]}
               >
                 {openingPreview ? (
-                  <ActivityIndicator size="small" color={colors.accentText} />
+                  <ActivityIndicator
+                    size="small"
+                    color={submitDisabled ? colors.textMuted : colors.accentText}
+                  />
                 ) : (
-                  <Ionicons name="arrow-forward" size={16} color={colors.accentText} />
+                  <Ionicons
+                    name="arrow-forward"
+                    size={16}
+                    color={submitDisabled ? colors.textMuted : colors.accentText}
+                  />
                 )}
               </Pressable>
             </View>
@@ -1171,7 +1186,7 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
                 styles.previewSurface,
                 {
                   marginBottom: Platform.OS === 'web' ? bottomBarReservedSpace : 0,
-                  backgroundColor: desktopModeEnabled ? '#000' : theme.colors.bgMain,
+                  backgroundColor: desktopModeEnabled ? theme.colors.black : theme.colors.bgMain,
                 },
               ]}
             >
@@ -1700,7 +1715,7 @@ const createStyles = (theme: AppTheme) =>
     },
     viewportMenuBackdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.48)',
+      backgroundColor: theme.colors.overlayBackdrop,
       justifyContent: 'center',
       paddingHorizontal: theme.spacing.md,
     },
@@ -1863,11 +1878,11 @@ const createStyles = (theme: AppTheme) =>
     },
     statusBannerWarning: {
       backgroundColor: theme.colors.warningBg,
-      borderColor: 'rgba(247, 210, 126, 0.22)',
+      borderColor: theme.colors.warningBorder,
     },
     statusBannerError: {
       backgroundColor: theme.colors.errorBg,
-      borderColor: 'rgba(239, 68, 68, 0.28)',
+      borderColor: theme.colors.errorBorder,
     },
     statusBannerText: {
       ...theme.typography.caption,
@@ -1986,7 +2001,7 @@ const createStyles = (theme: AppTheme) =>
       ...theme.typography.caption,
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
-      letterSpacing: 0.8,
+      letterSpacing: 0,
     },
     sectionSubtitle: {
       ...theme.typography.caption,

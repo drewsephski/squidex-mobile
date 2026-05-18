@@ -2,11 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { ChatEngine } from '../api/types';
+import { ChatEngineIcon } from './ChatEngineIcon';
 import { useAppTheme, type AppTheme } from '../theme';
 
 interface ChatHeaderProps {
   onOpenDrawer: () => void;
   title: string;
+  engine?: ChatEngine | null;
   engineLabel?: string;
   onOpenTitleMenu?: () => void;
   rightIconName?: keyof typeof Ionicons.glyphMap;
@@ -16,6 +19,7 @@ interface ChatHeaderProps {
 export function ChatHeader({
   onOpenDrawer,
   title,
+  engine,
   engineLabel,
   onOpenTitleMenu,
   rightIconName,
@@ -42,11 +46,7 @@ export function ChatHeader({
               <Text numberOfLines={1} style={styles.modelName}>
                 {titleDisplay}
               </Text>
-              {engineLabel ? (
-                <View style={styles.engineBadge}>
-                  <Text style={styles.engineBadgeText}>{engineLabel}</Text>
-                </View>
-              ) : null}
+              {engineLabel ? <ChatEngineIcon engine={engine} size={18} /> : null}
               <Ionicons name="chevron-down" size={12} color={colors.textMuted} />
             </Pressable>
           ) : (
@@ -54,11 +54,7 @@ export function ChatHeader({
               <Text numberOfLines={1} style={styles.modelName}>
                 {titleDisplay}
               </Text>
-              {engineLabel ? (
-                <View style={styles.engineBadge}>
-                  <Text style={styles.engineBadgeText}>{engineLabel}</Text>
-                </View>
-              ) : null}
+              {engineLabel ? <ChatEngineIcon engine={engine} size={18} /> : null}
             </View>
           )}
           <View style={{ flex: 1 }} />
@@ -81,8 +77,6 @@ const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     headerContainer: {
       backgroundColor: theme.colors.bgMain,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.borderLight,
     },
     header: {
       flexDirection: 'row',
@@ -120,21 +114,5 @@ const createStyles = (theme: AppTheme) =>
       fontSize: 17,
       color: theme.colors.textPrimary,
       flexShrink: 1,
-    },
-    engineBadge: {
-      borderRadius: 999,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.isDark ? theme.colors.borderHighlight : theme.colors.border,
-      backgroundColor: theme.isDark ? theme.colors.bgItem : theme.colors.bgInput,
-      paddingHorizontal: theme.spacing.xs + 2,
-      paddingVertical: 2,
-    },
-    engineBadgeText: {
-      ...theme.typography.caption,
-      color: theme.isDark ? theme.colors.textSecondary : theme.colors.textPrimary,
-      fontSize: 10,
-      fontWeight: '600',
-      letterSpacing: 0.3,
-      textTransform: 'uppercase',
     },
   });

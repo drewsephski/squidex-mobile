@@ -1,24 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
-import { memo, useMemo, useState, type ReactElement } from 'react';
+import { Fragment, memo, useCallback, useMemo, useState, type ReactElement } from 'react';
 import {
   Image,
+  Modal,
   Pressable,
+  ScrollView,
   type ImageSourcePropType,
   Linking,
   StyleSheet,
   Text,
   type TextProps,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Markdown, { type RenderRules } from 'react-native-markdown-display';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ChatMessage as ApiChatMessage } from '../api/types';
+import type { ChatEngine, ChatMessage as ApiChatMessage } from '../api/types';
 import { extractLocalPreviewUrls } from '../browserPreview';
 import { useAppTheme, type AppTheme } from '../theme';
 import { toMarkdownImageSource } from './chatImageSource';
+import {
+  computerUseActionIconName,
+  isComputerUseTraceEntry,
+  parseComputerUseTraceEntry,
+} from './computerUseTrace';
 
 interface ChatMessageProps {
   message: ApiChatMessage;
+  engine?: ChatEngine | null;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
   onOpenLocalPreview?: (targetUrl: string) => void;
@@ -26,8 +36,11 @@ interface ChatMessageProps {
 
 interface ToolActivityGroupProps {
   messages: ApiChatMessage[];
+  engine?: ChatEngine | null;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
+  /** While the server reports an in-flight turn, surface live affordances (badge, border). */
+  liveTurnActive?: boolean;
 }
 
 interface TimelineEntry {
@@ -41,6 +54,22 @@ interface ToolGroupEntry {
   details: string[];
 }
 
+interface TimelineDetailMediaPreview {
+  source: ImageSourcePropType;
+  accessibilityLabel?: string;
+}
+
+interface TimelineDetailPreview {
+  textDetails: string[];
+  images: TimelineDetailMediaPreview[];
+}
+
+interface ComputerUseTimelineProps {
+  entries: ToolGroupEntry[];
+  bridgeUrl: string | null;
+  bridgeToken: string | null;
+}
+
 type MessageBlock =
   | { kind: 'text'; value: string }
   | { kind: 'file'; value: string }
@@ -48,6 +77,7 @@ type MessageBlock =
 
 function ChatMessageComponent({
   message,
+  engine = null,
   bridgeUrl = null,
   bridgeToken = null,
   onOpenLocalPreview,
@@ -56,6 +86,7 @@ function ChatMessageComponent({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const markdownStyles = useMemo(() => createMarkdownStyles(theme), [theme]);
   const isUser = message.role === 'user';
+  const isCursor = engine === 'cursor';
   const markdownRules = useMemo(
     () => createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview),
     [bridgeToken, bridgeUrl, onOpenLocalPreview]
@@ -220,6 +251,21 @@ function ChatMessageComponent({
       </View>
     );
   }
+  if (
+    isCursor &&
+    message.role === 'system' &&
+    (message.systemKind === 'reasoning' ||
+      message.systemKind === 'tool' ||
+      message.systemKind === 'subAgent')
+  ) {
+    return (
+      <CursorSystemMessage
+        message={message}
+        bridgeUrl={bridgeUrl}
+        bridgeToken={bridgeToken}
+      />
+    );
+  }
   if (message.role === 'system' && message.systemKind === 'reasoning') {
     const reasoningEntries =
       timelineEntries && timelineEntries.length > 0
@@ -348,28 +394,47 @@ function ChatMessageComponent({
     );
   }
   if (timelineEntries && timelineEntries.length > 0) {
+    const timelineToolEntries = timelineEntries.map((entry, index) => ({
+      id: `${message.id}-timeline-${String(index)}`,
+      title: entry.title,
+      details: entry.details,
+    }));
+    if (entriesAreComputerUseTimeline(timelineToolEntries)) {
+      return (
+        <ComputerUseTimeline
+          entries={timelineToolEntries}
+          bridgeUrl={bridgeUrl}
+          bridgeToken={bridgeToken}
+        />
+      );
+    }
+
     return (
       <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
         <View style={styles.timelineCardStack}>
           {timelineEntries.map((entry, index) => {
             const visual = toTimelineVisual(entry.title);
-            const viewedImage = toViewedImagePreview(
+            const detailPreview = toTimelineDetailPreview(
               entry,
               bridgeUrl,
               bridgeToken
             );
+            const hasImages = detailPreview.images.length > 0;
+            const textDetails = detailPreview.textDetails;
             const timelineKey = `${message.id}-timeline-${String(index)}`;
-            const hasDetails = entry.details.length > 0;
+            const hasDetails = textDetails.length > 0;
             const expanded = expandedTimelineEntries[timelineKey] === true;
-            const toggleLabel = viewedImage
-              ? expanded
-                ? 'Tap to hide path'
-                : 'Tap to show path'
-              : expanded
-                ? 'Tap to hide output'
-                : entry.details.length <= 1
-                  ? 'Tap to show output'
-                  : `Tap to show ${String(entry.details.length)} lines`;
+            const toggleLabel = hasDetails
+              ? hasImages && isViewedImageEntry(entry.title, textDetails)
+                ? expanded
+                  ? 'Tap to hide path'
+                  : 'Tap to show path'
+                : expanded
+                  ? 'Tap to hide details'
+                  : textDetails.length <= 1
+                    ? 'Tap to show details'
+                    : `Tap to show ${String(textDetails.length)} lines`
+              : null;
             return (
               <Pressable
                 key={`${message.id}-timeline-${String(index)}`}
@@ -416,16 +481,16 @@ function ChatMessageComponent({
                 {hasDetails ? (
                   <Text style={styles.timelineToggleText}>{toggleLabel}</Text>
                 ) : null}
-                {viewedImage ? (
+                {detailPreview.images.map((image, imageIndex) => (
                   <MarkdownImage
-                    key={`${timelineKey}-image`}
-                    source={viewedImage.source}
-                    accessibilityLabel={viewedImage.accessibilityLabel}
+                    key={`${timelineKey}-image-${String(imageIndex)}`}
+                    source={image.source}
+                    accessibilityLabel={image.accessibilityLabel}
                   />
-                ) : null}
-                {expanded && entry.details.length > 0 ? (
+                ))}
+                {expanded && textDetails.length > 0 ? (
                   <View style={styles.timelineDetailWrap}>
-                    {entry.details.map((line, lineIndex) => (
+                    {textDetails.map((line, lineIndex) => (
                       <SelectableMessageText
                         key={`${message.id}-timeline-${String(index)}-line-${String(lineIndex)}`}
                         style={styles.timelineDetailLine}
@@ -488,6 +553,7 @@ function areChatMessagePropsEqual(
     previous.content === next.content &&
     previous.createdAt === next.createdAt &&
     previous.systemKind === next.systemKind &&
+    prevProps.engine === nextProps.engine &&
     prevProps.bridgeUrl === nextProps.bridgeUrl &&
     prevProps.bridgeToken === nextProps.bridgeToken &&
     prevProps.onOpenLocalPreview === nextProps.onOpenLocalPreview
@@ -497,15 +563,29 @@ function areChatMessagePropsEqual(
 export const ChatMessage = memo(ChatMessageComponent, areChatMessagePropsEqual);
 ChatMessage.displayName = 'ChatMessage';
 
+const TOOL_GROUP_COLLAPSED_PREVIEW_COUNT = 2;
+const TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT = 300;
+const TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT_RATIO = 0.38;
+/** Detail bodies taller than this scroll inside the expanded card instead of stretching it. */
+const TOOL_GROUP_DETAIL_LINES_SCROLL_THRESHOLD = 24;
+
 export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
   messages,
+  engine = null,
   bridgeUrl = null,
   bridgeToken = null,
+  liveTurnActive = false,
 }: ToolActivityGroupProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const { height: windowHeight } = useWindowDimensions();
+  const expandedListMaxHeight = Math.min(
+    TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT,
+    Math.floor(windowHeight * TOOL_GROUP_EXPANDED_LIST_MAX_HEIGHT_RATIO)
+  );
   const [expanded, setExpanded] = useState(false);
   const [expandedEntryIds, setExpandedEntryIds] = useState<Record<string, boolean>>({});
+
   const entries = useMemo(() => {
     const flattened: ToolGroupEntry[] = [];
     for (const message of messages) {
@@ -530,19 +610,207 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
     return flattened.filter((entry) => entry.title.length > 0);
   }, [messages]);
 
+  const toggleExpanded = useCallback(() => {
+    setExpanded((previous) => !previous);
+  }, []);
+
   if (entries.length === 0) {
     return null;
   }
 
-  const previewEntries = expanded ? entries : entries.slice(0, 3);
+  if (entriesAreComputerUseTimeline(entries)) {
+    return (
+      <ComputerUseTimeline
+        entries={entries}
+        bridgeUrl={bridgeUrl}
+        bridgeToken={bridgeToken}
+      />
+    );
+  }
+
+  const previewEntries = expanded
+    ? entries
+    : entries.slice(0, TOOL_GROUP_COLLAPSED_PREVIEW_COUNT);
   const hiddenCount = Math.max(entries.length - previewEntries.length, 0);
   const summary = summarizeToolGroup(entries.map((entry) => entry.title));
 
+  const listInner = (
+    <>
+      {previewEntries.map((entry, entryIndex) => {
+            const detailPreview = toTimelineDetailPreview(
+              entry,
+              bridgeUrl,
+              bridgeToken
+            );
+            const hasImages = detailPreview.images.length > 0;
+            const textDetails = detailPreview.textDetails;
+            const hasDetails = textDetails.length > 0;
+            const entryExpanded = expandedEntryIds[entry.id] === true;
+            const rowVisual = toTimelineVisual(entry.title);
+            const cursorVisual =
+              engine === 'cursor'
+                ? toCursorActivityVisual(entry.title, textDetails, 'tool')
+                : null;
+            const rowTitle = cursorVisual?.title ?? entry.title;
+            const rowError = Boolean(cursorVisual?.isError || rowVisual.isError);
+
+            if (!expanded) {
+              const previewImage = detailPreview.images[0] ?? null;
+              return (
+                <View key={entry.id} style={styles.toolGroupPreviewEntry}>
+                  <View style={styles.toolGroupRow}>
+                    <Ionicons
+                      name={rowVisual.icon}
+                      size={13}
+                      color={rowError ? theme.colors.statusError : theme.colors.textMuted}
+                      style={styles.toolGroupPreviewIcon}
+                    />
+                    <Text style={styles.toolGroupRowText} numberOfLines={1}>
+                      {rowTitle}
+                    </Text>
+                  </View>
+                  {previewImage ? (
+                    <View style={styles.toolGroupPreviewImageClip}>
+                      <MarkdownImage
+                        key={`${entry.id}-preview-image`}
+                        source={previewImage.source}
+                        accessibilityLabel={previewImage.accessibilityLabel}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+              );
+            }
+
+            return (
+              <Fragment key={entry.id}>
+                <Pressable
+                  disabled={!hasDetails}
+                  onPress={() => {
+                    if (!hasDetails) {
+                      return;
+                    }
+                    setExpandedEntryIds((previous) => ({
+                      ...previous,
+                      [entry.id]: !previous[entry.id],
+                    }));
+                  }}
+                  style={({ pressed }) => [
+                    styles.toolGroupEntryCard,
+                    hasDetails && styles.toolGroupEntryCardInteractive,
+                    rowError && styles.timelineCardError,
+                    pressed && hasDetails && styles.toolGroupEntryCardPressed,
+                  ]}
+                >
+                  <View style={styles.toolGroupEntryHeader}>
+                    <Ionicons
+                      name={rowVisual.icon}
+                      size={14}
+                      color={
+                        rowError ? theme.colors.statusError : theme.colors.statusRunning
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.toolGroupEntryTitle,
+                        rowVisual.useMonospaceTitle && styles.toolGroupEntryTitleMono,
+                      ]}
+                      numberOfLines={entryExpanded ? 3 : 1}
+                    >
+                      {rowTitle}
+                    </Text>
+                    {hasDetails ? (
+                      <Ionicons
+                        name={entryExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={14}
+                        color={theme.colors.textMuted}
+                      />
+                    ) : null}
+                  </View>
+                  {hasDetails ? (
+                    <Text style={styles.toolGroupEntryToggleText}>
+                      {hasImages && isViewedImageEntry(entry.title, textDetails)
+                        ? entryExpanded
+                          ? 'Tap to hide path'
+                          : 'Tap to show path'
+                        : entryExpanded
+                          ? 'Tap to hide output'
+                          : textDetails.length <= 1
+                            ? 'Tap to show output'
+                            : `Tap to show ${String(textDetails.length)} lines`}
+                    </Text>
+                  ) : null}
+                  {detailPreview.images.map((image, imageIndex) => (
+                    <MarkdownImage
+                      key={`${entry.id}-image-${String(imageIndex)}`}
+                      source={image.source}
+                      accessibilityLabel={image.accessibilityLabel}
+                    />
+                  ))}
+                  {entryExpanded && hasDetails ? (
+                    textDetails.length > TOOL_GROUP_DETAIL_LINES_SCROLL_THRESHOLD ? (
+                      <ScrollView
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator
+                        style={[styles.toolGroupEntryDetailScroll, styles.toolGroupEntryDetailWrapOffset]}
+                      >
+                        <View style={styles.toolGroupEntryDetailSurface}>
+                          {textDetails.map((line, lineIndex) => (
+                            <SelectableMessageText
+                              key={`${entry.id}-line-${String(lineIndex)}`}
+                              style={styles.toolGroupEntryDetailLine}
+                            >
+                              {line}
+                            </SelectableMessageText>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    ) : (
+                      <View
+                        style={[styles.toolGroupEntryDetailWrapOffset, styles.toolGroupEntryDetailSurface]}
+                      >
+                        {textDetails.map((line, lineIndex) => (
+                          <SelectableMessageText
+                            key={`${entry.id}-line-${String(lineIndex)}`}
+                            style={styles.toolGroupEntryDetailLine}
+                          >
+                            {line}
+                          </SelectableMessageText>
+                        ))}
+                      </View>
+                    )
+                  ) : null}
+                </Pressable>
+                {entryIndex < previewEntries.length - 1 ? (
+                  <View style={styles.toolGroupEntryDivider} />
+                ) : null}
+              </Fragment>
+            );
+          })}
+      {!expanded && hiddenCount > 0 ? (
+        <Text style={styles.toolGroupMoreText}>{`+${String(hiddenCount)} more`}</Text>
+      ) : null}
+    </>
+  );
+
   return (
     <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
-      <View style={styles.toolGroupCard}>
+      <View style={[styles.toolGroupCard, liveTurnActive && styles.toolGroupCardLive]}>
+        <View style={styles.toolGroupEyebrowRow}>
+          <View style={styles.toolGroupEyebrowLeft}>
+            <Ionicons name="hardware-chip-outline" size={12} color={theme.colors.textMuted} />
+            <Text style={styles.toolGroupEyebrowText}>Tools</Text>
+          </View>
+          {liveTurnActive ? (
+            <View style={styles.toolGroupLiveBadge}>
+              <View style={styles.toolGroupLiveDot} />
+              <Text style={styles.toolGroupLiveBadgeText}>Live</Text>
+            </View>
+          ) : null}
+        </View>
         <Pressable
-          onPress={() => setExpanded((previous) => !previous)}
+          onPress={toggleExpanded}
           style={({ pressed }) => [
             styles.toolGroupHeaderPressable,
             styles.toolGroupCardInteractive,
@@ -550,7 +818,7 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
           ]}
         >
           <View style={styles.toolGroupHeader}>
-            <Ionicons name="construct-outline" size={14} color={theme.colors.textMuted} />
+            <Ionicons name="chevron-expand-outline" size={14} color={theme.colors.textMuted} />
             <Text style={styles.toolGroupTitle}>{summary}</Text>
             <Ionicons
               name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -560,124 +828,341 @@ export const ToolActivityGroup = memo(function ToolActivityGroupComponent({
           </View>
         </Pressable>
 
-        <View style={styles.toolGroupList}>
-          {previewEntries.map((entry) => {
-            const hasDetails = entry.details.length > 0;
-            const visual = toTimelineVisual(entry.title);
-            const viewedImage = toViewedImagePreview(
-              entry,
-              bridgeUrl,
-              bridgeToken
-            );
-            const entryExpanded = expandedEntryIds[entry.id] === true;
-
-            if (!expanded) {
-              return (
-                <View key={entry.id} style={styles.toolGroupRow}>
-                  <Text style={styles.toolGroupBullet}>{'\u2022'}</Text>
-                  <Text style={styles.toolGroupRowText} numberOfLines={1}>
-                    {entry.title}
-                  </Text>
-                </View>
-              );
-            }
-
-            return (
-              <Pressable
-                key={entry.id}
-                disabled={!hasDetails}
-                onPress={() => {
-                  if (!hasDetails) {
-                    return;
-                  }
-                  setExpandedEntryIds((previous) => ({
-                    ...previous,
-                    [entry.id]: !previous[entry.id],
-                  }));
-                }}
-                style={({ pressed }) => [
-                  styles.toolGroupEntryCard,
-                  hasDetails && styles.toolGroupEntryCardInteractive,
-                  visual.isError && styles.timelineCardError,
-                  pressed && hasDetails && styles.toolGroupEntryCardPressed,
-                ]}
-              >
-                <View style={styles.toolGroupEntryHeader}>
-                  <Ionicons
-                    name={visual.icon}
-                    size={14}
-                    color={
-                      visual.isError
-                        ? theme.colors.statusError
-                        : theme.colors.statusRunning
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.toolGroupEntryTitle,
-                      visual.useMonospaceTitle && styles.toolGroupEntryTitleMono,
-                    ]}
-                    numberOfLines={entryExpanded ? 3 : 1}
-                  >
-                    {entry.title}
-                  </Text>
-                  {hasDetails ? (
-                    <Ionicons
-                      name={entryExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={14}
-                      color={theme.colors.textMuted}
-                    />
-                  ) : null}
-                </View>
-                {hasDetails ? (
-                  <Text style={styles.toolGroupEntryToggleText}>
-                    {viewedImage
-                      ? entryExpanded
-                        ? 'Tap to hide path'
-                        : 'Tap to show path'
-                      : entryExpanded
-                        ? 'Tap to hide output'
-                        : entry.details.length <= 1
-                          ? 'Tap to show output'
-                          : `Tap to show ${String(entry.details.length)} lines`}
-                  </Text>
-                ) : null}
-                {viewedImage ? (
-                  <MarkdownImage
-                    key={`${entry.id}-image`}
-                    source={viewedImage.source}
-                    accessibilityLabel={viewedImage.accessibilityLabel}
-                  />
-                ) : null}
-                {entryExpanded && hasDetails ? (
-                  <View style={styles.toolGroupEntryDetailWrap}>
-                    {entry.details.map((line, lineIndex) => (
-                      <SelectableMessageText
-                        key={`${entry.id}-line-${String(lineIndex)}`}
-                        style={styles.toolGroupEntryDetailLine}
-                      >
-                        {line}
-                      </SelectableMessageText>
-                    ))}
-                  </View>
-                ) : null}
-              </Pressable>
-            );
-          })}
-          {!expanded && hiddenCount > 0 ? (
-            <Text style={styles.toolGroupMoreText}>{`+${String(hiddenCount)} more`}</Text>
-          ) : null}
-        </View>
+        {expanded ? (
+          <ScrollView
+            style={{ maxHeight: expandedListMaxHeight }}
+            contentContainerStyle={styles.toolGroupListScrollContent}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <View style={styles.toolGroupList}>{listInner}</View>
+          </ScrollView>
+        ) : (
+          <View style={styles.toolGroupList}>{listInner}</View>
+        )}
       </View>
     </View>
   );
 });
 ToolActivityGroup.displayName = 'ToolActivityGroup';
 
+function CursorSystemMessage({
+  message,
+  bridgeUrl,
+  bridgeToken,
+}: {
+  message: ApiChatMessage;
+  bridgeUrl: string | null;
+  bridgeToken: string | null;
+}): ReactElement | null {
+  const parsed = parseTimelineEntries(message.content);
+  const fallbackTitle =
+    message.systemKind === 'reasoning'
+      ? 'Thinking'
+      : message.systemKind === 'subAgent'
+        ? 'Task'
+        : message.content.trim();
+  const entries =
+    parsed && parsed.length > 0
+      ? parsed.map((entry, index) => ({
+          id: `${message.id}-cursor-${String(index)}`,
+          title: entry.title,
+          details: entry.details,
+        }))
+      : [
+          {
+            id: `${message.id}-cursor`,
+            title: fallbackTitle,
+            details:
+              fallbackTitle === message.content.trim() ? [] : [message.content],
+          },
+        ];
+
+  return (
+    <CursorActivityMessage
+      entries={entries}
+      bridgeUrl={bridgeUrl}
+      bridgeToken={bridgeToken}
+      systemKind={message.systemKind}
+    />
+  );
+}
+
+function CursorActivityMessage({
+  entries,
+  bridgeUrl,
+  bridgeToken,
+  systemKind,
+}: {
+  entries: ToolGroupEntry[];
+  bridgeUrl: string | null;
+  bridgeToken: string | null;
+  systemKind?: ApiChatMessage['systemKind'];
+}): ReactElement | null {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const [expandedEntryIds, setExpandedEntryIds] = useState<Record<string, boolean>>({});
+  const visibleEntries = entries.filter((entry) => entry.title.trim().length > 0);
+
+  if (visibleEntries.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
+      <View style={styles.cursorActivityList}>
+        {visibleEntries.map((entry) => {
+          const detailPreview = toTimelineDetailPreview(entry, bridgeUrl, bridgeToken);
+          const textDetails = detailPreview.textDetails;
+          const visual = toCursorActivityVisual(entry.title, textDetails, systemKind);
+          const hasDetails = textDetails.length > 0 || detailPreview.images.length > 0;
+          const expanded = expandedEntryIds[entry.id] === true;
+          const preview = toCursorActivityPreview(textDetails, visual);
+
+          return (
+            <Pressable
+              key={entry.id}
+              disabled={!hasDetails}
+              onPress={() => {
+                if (!hasDetails) {
+                  return;
+                }
+                setExpandedEntryIds((previous) => ({
+                  ...previous,
+                  [entry.id]: !previous[entry.id],
+                }));
+              }}
+              style={({ pressed }) => [
+                styles.cursorActivityRow,
+                pressed && hasDetails && styles.cursorActivityRowPressed,
+              ]}
+            >
+              <View style={styles.cursorActivityRail}>
+                <View
+                  style={[
+                    styles.cursorActivityMarker,
+                    visual.kind === 'thought' && styles.cursorActivityMarkerThought,
+                    visual.kind === 'terminal' && styles.cursorActivityMarkerTerminal,
+                    visual.isError && styles.cursorActivityMarkerError,
+                  ]}
+                />
+              </View>
+              <View style={styles.cursorActivityBody}>
+                <View style={styles.cursorActivityHeader}>
+                  <Text
+                    style={styles.cursorActivityTitle}
+                    numberOfLines={expanded ? 2 : 1}
+                  >
+                    {visual.title}
+                  </Text>
+                  {hasDetails ? (
+                    <Ionicons
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={13}
+                      color={theme.colors.textMuted}
+                    />
+                  ) : null}
+                </View>
+                {!expanded && preview ? (
+                  <SelectableMessageText
+                    style={styles.cursorActivityPreview}
+                    numberOfLines={1}
+                  >
+                    {preview}
+                  </SelectableMessageText>
+                ) : null}
+                {expanded ? (
+                  <View style={styles.cursorActivityDetails}>
+                    {detailPreview.images.map((image, imageIndex) => (
+                      <MarkdownImage
+                        key={`${entry.id}-cursor-image-${String(imageIndex)}`}
+                        source={image.source}
+                        accessibilityLabel={image.accessibilityLabel}
+                      />
+                    ))}
+                    {textDetails.map((line, lineIndex) => (
+                      <SelectableMessageText
+                        key={`${entry.id}-cursor-line-${String(lineIndex)}`}
+                        style={styles.cursorActivityDetailLine}
+                      >
+                        {line}
+                      </SelectableMessageText>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function ComputerUseTimeline({
+  entries,
+  bridgeUrl,
+  bridgeToken,
+}: ComputerUseTimelineProps): ReactElement | null {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const parsedEntries = entries
+    .map((entry) => {
+      const parsed = parseComputerUseTraceEntry(entry);
+      if (!parsed) {
+        return null;
+      }
+      return {
+        entry,
+        parsed,
+        detailPreview: toTimelineDetailPreview(entry, bridgeUrl, bridgeToken),
+      };
+    })
+    .filter(
+      (
+        entry
+      ): entry is {
+        entry: ToolGroupEntry;
+        parsed: NonNullable<ReturnType<typeof parseComputerUseTraceEntry>>;
+        detailPreview: TimelineDetailPreview;
+      } => entry !== null
+    );
+
+  if (parsedEntries.length === 0) {
+    return null;
+  }
+
+  return (
+    <View
+      style={[
+        styles.messageWrapper,
+        styles.messageWrapperAssistant,
+        styles.messageWrapperFullWidth,
+      ]}
+    >
+      <View style={styles.computerUseTrace}>
+        {parsedEntries.length > 1 ? (
+          <View style={styles.computerUseTraceSummaryRow}>
+            <Ionicons name="desktop-outline" size={14} color={theme.colors.textMuted} />
+            <Text style={styles.computerUseTraceSummaryText}>
+              {`${String(parsedEntries.length)} actions`}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.computerUseTraceStepList}>
+          {parsedEntries.map(({ entry, parsed, detailPreview }) => {
+            return (
+              <View key={entry.id} style={styles.computerUseTraceStep}>
+                <View style={styles.computerUseTraceStepBody}>
+                  <View style={styles.computerUseTraceStepTopRow}>
+                    <Ionicons
+                      name={computerUseActionIconName(parsed.actionKey)}
+                      size={13}
+                      color={theme.colors.textMuted}
+                    />
+                    <Text style={styles.computerUseTraceAction}>{parsed.actionLabel}</Text>
+                    {parsed.appName ? (
+                      <Text style={styles.computerUseTraceInlineMeta} numberOfLines={1}>
+                        {parsed.appName}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {detailPreview.images.map((image, imageIndex) => (
+                    <MarkdownImage
+                      key={`${entry.id}-computer-use-image-${String(imageIndex)}`}
+                      source={image.source}
+                      accessibilityLabel={image.accessibilityLabel}
+                    />
+                  ))}
+
+                  {!detailPreview.images.length && parsed.windowTitle ? (
+                    <Text style={styles.computerUseTraceInlineMeta} numberOfLines={1}>
+                      {parsed.windowTitle}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
   body: {
     ...theme.typography.body,
     color: theme.colors.textPrimary,
+  },
+  heading1: {
+    ...theme.typography.headline,
+    color: theme.colors.textPrimary,
+    fontSize: 18,
+    lineHeight: 24,
+    letterSpacing: 0,
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  heading2: {
+    ...theme.typography.headline,
+    color: theme.colors.textPrimary,
+    fontSize: 17,
+    lineHeight: 23,
+    letterSpacing: 0,
+    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  heading3: {
+    ...theme.typography.headline,
+    color: theme.colors.textPrimary,
+    fontSize: 15,
+    lineHeight: 21,
+    letterSpacing: 0,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  heading4: {
+    ...theme.typography.headline,
+    color: theme.colors.textPrimary,
+    fontSize: 14,
+    lineHeight: 20,
+    letterSpacing: 0,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  heading5: {
+    ...theme.typography.headline,
+    color: theme.colors.textPrimary,
+    fontSize: 14,
+    lineHeight: 20,
+    letterSpacing: 0,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  heading6: {
+    ...theme.typography.headline,
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   code_inline: {
     fontFamily: theme.fonts.monoRegular,
@@ -728,6 +1213,47 @@ const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
   },
   list_item: {
     marginVertical: 2,
+  },
+  table_scroll: {
+    maxWidth: '100%',
+    marginVertical: theme.spacing.sm,
+  },
+  table_scroll_content: {
+    paddingBottom: theme.spacing.xs,
+  },
+  table: {
+    minWidth: 560,
+    alignSelf: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderHighlight,
+    borderRadius: theme.radius.sm,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.bgElevated,
+  },
+  thead: {
+    backgroundColor: theme.colors.bgItem,
+  },
+  tbody: {
+    backgroundColor: theme.colors.bgElevated,
+  },
+  tr: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderLight,
+  },
+  th: {
+    flex: 0,
+    width: 176,
+    minWidth: 176,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+  },
+  td: {
+    flex: 0,
+    width: 176,
+    minWidth: 176,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
   },
   strong: {
     fontWeight: '700',
@@ -796,6 +1322,19 @@ function createMarkdownRules(
         </SelectableMessageText>
       );
     },
+    table: (node, children, _parent, styles) => (
+      <ScrollView
+        key={node.key}
+        horizontal
+        nestedScrollEnabled
+        bounces={false}
+        showsHorizontalScrollIndicator={false}
+        style={styles.table_scroll}
+        contentContainerStyle={styles.table_scroll_content}
+      >
+        <View style={styles._VIEW_SAFE_table}>{children}</View>
+      </ScrollView>
+    ),
     hardbreak: (node, _children, _parent, styles) => (
       <SelectableMessageText key={node.key} style={styles.hardbreak}>
         {'\n'}
@@ -867,13 +1406,13 @@ function createMarkdownRules(
   };
 }
 
+function entriesAreComputerUseTimeline(entries: Array<Pick<ToolGroupEntry, 'title'>>): boolean {
+  return entries.length > 0 && entries.every((entry) => isComputerUseTraceEntry(entry));
+}
+
 const createStyles = (theme: AppTheme) => {
-  const subAgentBorder = theme.isDark
-    ? 'rgba(245, 165, 36, 0.35)'
-    : 'rgba(217, 119, 6, 0.24)';
-  const subAgentBackground = theme.isDark
-    ? 'rgba(245, 165, 36, 0.08)'
-    : 'rgba(217, 119, 6, 0.08)';
+  const subAgentBorder = theme.colors.warningBorder;
+  const subAgentBackground = theme.colors.warningBg;
 
   return StyleSheet.create({
   messageWrapper: {
@@ -953,9 +1492,50 @@ const createStyles = (theme: AppTheme) => {
     marginVertical: theme.spacing.sm,
     backgroundColor: theme.colors.bgInput,
   },
+  markdownImagePressable: {
+    alignSelf: 'stretch',
+  },
+  markdownImagePressablePressed: {
+    opacity: 0.88,
+  },
   markdownImageFallback: {
     minHeight: 120,
     maxHeight: 260,
+  },
+  imageViewerModalRoot: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  imageViewerCloseButtonFloating: {
+    position: 'absolute',
+    zIndex: 3,
+  },
+  imageViewerCloseButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.24)',
+  },
+  imageViewerCloseButtonPressed: {
+    opacity: 0.84,
+  },
+  imageViewerScroll: {
+    flex: 1,
+  },
+  imageViewerScrollContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageViewerStage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageViewerImage: {
+    backgroundColor: '#000000',
   },
   timelineCardStack: {
     gap: theme.spacing.sm,
@@ -989,7 +1569,7 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     fontSize: 12,
-    letterSpacing: 0.2,
+    letterSpacing: 0,
     textTransform: 'none',
     flex: 1,
   },
@@ -1012,6 +1592,86 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
     marginTop: theme.spacing.xs,
+  },
+  cursorActivityList: {
+    gap: 2,
+    alignSelf: 'stretch',
+  },
+  cursorActivityRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing.xs,
+    paddingVertical: 2,
+  },
+  cursorActivityRowPressed: {
+    opacity: 0.78,
+  },
+  cursorActivityRail: {
+    width: 14,
+    minHeight: 22,
+    alignItems: 'center',
+    paddingTop: 7,
+  },
+  cursorActivityMarker: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: theme.colors.textMuted,
+    opacity: 0.62,
+  },
+  cursorActivityMarkerThought: {
+    backgroundColor: theme.colors.textSecondary,
+    opacity: 0.72,
+  },
+  cursorActivityMarkerTerminal: {
+    backgroundColor: theme.colors.warning,
+    opacity: 0.74,
+  },
+  cursorActivityMarkerError: {
+    backgroundColor: theme.colors.errorBg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.statusError,
+    opacity: 1,
+  },
+  cursorActivityBody: {
+    flex: 1,
+    minWidth: 0,
+    paddingBottom: 3,
+  },
+  cursorActivityHeader: {
+    minHeight: 19,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  cursorActivityTitle: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    flex: 1,
+    lineHeight: 17,
+    fontWeight: '500',
+  },
+  cursorActivityPreview: {
+    fontFamily: theme.fonts.monoRegular,
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    lineHeight: 16,
+    marginTop: 1,
+  },
+  cursorActivityDetails: {
+    marginTop: theme.spacing.xs,
+    gap: theme.spacing.xs,
+    borderRadius: theme.radius.sm,
+    borderWidth: 0,
+    backgroundColor: theme.colors.bgItem,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  cursorActivityDetailLine: {
+    fontFamily: theme.fonts.monoRegular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: theme.colors.textSecondary,
   },
   localPreviewLinkList: {
     marginTop: theme.spacing.sm,
@@ -1071,11 +1731,62 @@ const createStyles = (theme: AppTheme) => {
     paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.sm + 2,
   },
+  toolGroupCardLive: {
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.statusRunning,
+  },
+  toolGroupEyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginBottom: 2,
+  },
+  toolGroupEyebrowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
+  toolGroupLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 2,
+    borderRadius: theme.radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderHighlight,
+    backgroundColor: theme.colors.bgInput,
+  },
+  toolGroupLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.statusRunning,
+  },
+  toolGroupLiveBadgeText: {
+    ...theme.typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0,
+    color: theme.colors.textSecondary,
+    textTransform: 'uppercase',
+  },
+  toolGroupEyebrowText: {
+    ...theme.typography.caption,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0,
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+  },
   toolGroupHeaderPressable: {
     marginHorizontal: -theme.spacing.md,
-    marginTop: -(theme.spacing.sm + 2),
+    marginTop: 0,
     paddingHorizontal: theme.spacing.md,
-    paddingTop: theme.spacing.sm + 2,
+    paddingTop: 2,
     paddingBottom: 2,
   },
   toolGroupCardInteractive: {
@@ -1100,16 +1811,28 @@ const createStyles = (theme: AppTheme) => {
     marginTop: theme.spacing.xs,
     gap: 4,
   },
+  toolGroupListScrollContent: {
+    flexGrow: 0,
+    paddingBottom: theme.spacing.xs,
+  },
+  toolGroupPreviewImageClip: {
+    maxHeight: 72,
+    overflow: 'hidden',
+    borderRadius: theme.radius.sm,
+    alignSelf: 'stretch',
+  },
   toolGroupRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: theme.spacing.sm,
   },
-  toolGroupBullet: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    lineHeight: 16,
-    width: 8,
+  toolGroupPreviewEntry: {
+    gap: theme.spacing.xs,
+  },
+  toolGroupPreviewIcon: {
+    marginTop: 2,
+    width: 20,
+    alignSelf: 'flex-start',
   },
   toolGroupRowText: {
     ...theme.typography.caption,
@@ -1122,7 +1845,7 @@ const createStyles = (theme: AppTheme) => {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
     marginTop: 2,
-    paddingLeft: theme.spacing.lg,
+    paddingLeft: theme.spacing.md + 22,
   },
   toolGroupEntryCard: {
     borderRadius: theme.radius.sm,
@@ -1155,19 +1878,83 @@ const createStyles = (theme: AppTheme) => {
     marginTop: 2,
     paddingLeft: theme.spacing.lg + 2,
   },
-  toolGroupEntryDetailWrap: {
+  toolGroupEntryDetailScroll: {
+    maxHeight: 176,
+  },
+  toolGroupEntryDetailWrapOffset: {
     marginTop: theme.spacing.xs,
     marginLeft: theme.spacing.lg + 2,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: theme.colors.borderLight,
-    paddingLeft: theme.spacing.sm,
+  },
+  toolGroupEntryDetailSurface: {
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
     gap: 2,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.bgInput,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderLight,
+  },
+  toolGroupEntryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: theme.colors.borderLight,
+    marginVertical: theme.spacing.sm,
   },
   toolGroupEntryDetailLine: {
     fontFamily: theme.fonts.monoRegular,
     fontSize: 11,
     lineHeight: 16,
     color: theme.colors.textSecondary,
+  },
+  computerUseTrace: {
+    borderRadius: theme.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.borderLight,
+    backgroundColor: theme.colors.bgItem,
+    paddingHorizontal: theme.spacing.sm + 2,
+    paddingVertical: theme.spacing.sm + 2,
+    gap: theme.spacing.sm,
+  },
+  computerUseTraceSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingHorizontal: 2,
+  },
+  computerUseTraceSummaryText: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  computerUseTraceStepList: {
+    gap: theme.spacing.xs + 2,
+  },
+  computerUseTraceStep: {
+    gap: theme.spacing.xs,
+  },
+  computerUseTraceStepBody: {
+    flex: 1,
+    gap: theme.spacing.xs,
+  },
+  computerUseTraceStepTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: theme.spacing.xs,
+  },
+  computerUseTraceAction: {
+    ...theme.typography.body,
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  computerUseTraceInlineMeta: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    lineHeight: 16,
+    fontSize: 11,
+    flexShrink: 1,
   },
   subAgentCard: {
     borderRadius: theme.radius.md,
@@ -1319,38 +2106,163 @@ function MarkdownImage({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const safeAreaInsets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const modalImageWidth = Math.max(windowWidth, 160);
+  const closeButtonTop = Math.max(safeAreaInsets.top + theme.spacing.sm, 64);
+  const closeButtonRight = Math.max(safeAreaInsets.right + theme.spacing.md, theme.spacing.md);
+  const modalImageHeight = Math.max(windowHeight, 220);
+  const viewerImageFrame = useMemo(
+    () => resolveContainedImageFrame(modalImageWidth, modalImageHeight, aspectRatio),
+    [aspectRatio, modalImageHeight, modalImageWidth]
+  );
 
   return (
-    <Image
-      source={source}
-      style={[
-        styles.markdownImage,
-        aspectRatio ? { aspectRatio } : styles.markdownImageFallback,
-      ]}
-      resizeMode="contain"
-      accessible={Boolean(accessibilityLabel)}
-      accessibilityLabel={accessibilityLabel}
-      onLoad={(event) => {
-        const width = event.nativeEvent.source?.width;
-        const height = event.nativeEvent.source?.height;
-        if (
-          typeof width !== 'number' ||
-          typeof height !== 'number' ||
-          !Number.isFinite(width) ||
-          !Number.isFinite(height) ||
-          width <= 0 ||
-          height <= 0
-        ) {
-          return;
-        }
+    <>
+      <Pressable
+        testID="chat-image-fullscreen-trigger"
+        onPress={() => setViewerVisible(true)}
+        style={({ pressed }) => [
+          styles.markdownImagePressable,
+          pressed && styles.markdownImagePressablePressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? 'Chat image'}
+        accessibilityHint="Opens the image full screen"
+      >
+        <Image
+          source={source}
+          style={[
+            styles.markdownImage,
+            aspectRatio ? { aspectRatio } : styles.markdownImageFallback,
+          ]}
+          resizeMode="contain"
+          accessible={false}
+          onLoad={(event) => {
+            const width = event.nativeEvent.source?.width;
+            const height = event.nativeEvent.source?.height;
+            if (
+              typeof width !== 'number' ||
+              typeof height !== 'number' ||
+              !Number.isFinite(width) ||
+              !Number.isFinite(height) ||
+              width <= 0 ||
+              height <= 0
+            ) {
+              return;
+            }
 
-        const nextAspectRatio = width / height;
-        setAspectRatio((previousAspectRatio) =>
-          previousAspectRatio === nextAspectRatio ? previousAspectRatio : nextAspectRatio
-        );
-      }}
-    />
+            const nextAspectRatio = width / height;
+            setAspectRatio((previousAspectRatio) =>
+              previousAspectRatio === nextAspectRatio ? previousAspectRatio : nextAspectRatio
+            );
+          }}
+        />
+      </Pressable>
+      <Modal
+        testID="chat-image-fullscreen-modal"
+        visible={viewerVisible}
+        transparent
+        animationType="fade"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        hardwareAccelerated
+        supportedOrientations={['portrait', 'landscape']}
+        onRequestClose={() => setViewerVisible(false)}
+      >
+        <View
+          style={styles.imageViewerModalRoot}
+          accessibilityViewIsModal
+        >
+          <Pressable
+            testID="chat-image-fullscreen-backdrop"
+            style={StyleSheet.absoluteFill}
+            onPress={() => setViewerVisible(false)}
+          />
+          <ScrollView
+            style={styles.imageViewerScroll}
+            contentContainerStyle={[
+              styles.imageViewerScrollContent,
+              { width: windowWidth, minHeight: windowHeight },
+            ]}
+            centerContent
+            bouncesZoom
+            maximumZoomScale={4}
+            minimumZoomScale={1}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
+          >
+            <View
+              style={[
+                styles.imageViewerStage,
+                { width: windowWidth, minHeight: windowHeight },
+              ]}
+            >
+              <Image
+                source={source}
+                style={[
+                  styles.imageViewerImage,
+                  {
+                    width: viewerImageFrame.width,
+                    height: viewerImageFrame.height,
+                  },
+                ]}
+                resizeMode="contain"
+                accessible={Boolean(accessibilityLabel)}
+                accessibilityLabel={accessibilityLabel}
+              />
+            </View>
+          </ScrollView>
+          <Pressable
+            testID="chat-image-fullscreen-close"
+            onPress={() => setViewerVisible(false)}
+            hitSlop={12}
+            style={({ pressed }) => [
+              styles.imageViewerCloseButtonFloating,
+              {
+                top: closeButtonTop,
+                right: closeButtonRight,
+              },
+              styles.imageViewerCloseButton,
+              pressed && styles.imageViewerCloseButtonPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Close full-screen image"
+          >
+            <Ionicons name="close" size={28} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Modal>
+    </>
   );
+}
+
+function resolveContainedImageFrame(
+  maxWidth: number,
+  maxHeight: number,
+  aspectRatio: number | null
+): { width: number; height: number } {
+  if (!aspectRatio || !Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return {
+      width: maxWidth,
+      height: maxHeight,
+    };
+  }
+
+  const widthFromHeight = maxHeight * aspectRatio;
+  if (widthFromHeight <= maxWidth) {
+    return {
+      width: widthFromHeight,
+      height: maxHeight,
+    };
+  }
+
+  return {
+    width: maxWidth,
+    height: maxWidth / aspectRatio,
+  };
 }
 
 function parseMessageBlocks(
@@ -1379,32 +2291,15 @@ function parseMessageBlocks(
   };
 
   for (const line of content.split('\n')) {
-    const localImageMatch = line.match(/^\[local image:\s*(.+?)\]$/i);
-    if (localImageMatch) {
-      const source = toMarkdownImageSource(localImageMatch[1], bridgeUrl, bridgeToken);
-      if (source) {
-        flushTextBlock();
-        blocks.push({
-          kind: 'image',
-          source,
-          accessibilityLabel: toPathBasename(localImageMatch[1]),
-        });
-        continue;
-      }
-    }
-
-    const remoteImageMatch = line.match(/^\[image:\s*(.+?)\]$/i);
-    if (remoteImageMatch) {
-      const source = toMarkdownImageSource(remoteImageMatch[1], bridgeUrl, bridgeToken);
-      if (source) {
-        flushTextBlock();
-        blocks.push({
-          kind: 'image',
-          source,
-          accessibilityLabel: toPathBasename(remoteImageMatch[1]),
-        });
-        continue;
-      }
+    const inlineImage = toInlineImagePreviewFromMarkerLine(line, bridgeUrl, bridgeToken);
+    if (inlineImage) {
+      flushTextBlock();
+      blocks.push({
+        kind: 'image',
+        source: inlineImage.source,
+        accessibilityLabel: inlineImage.accessibilityLabel,
+      });
+      continue;
     }
 
     const fileMatch = line.match(/^\[file:\s*(.+?)\]$/i);
@@ -1438,34 +2333,92 @@ function parseMessageBlocks(
   return blocks;
 }
 
-function toViewedImagePreview(
+function toTimelineDetailPreview(
   entry: TimelineEntry | ToolGroupEntry,
   bridgeUrl: string | null,
   bridgeToken: string | null
-): { source: ImageSourcePropType; accessibilityLabel?: string } | null {
-  if (!/^•\s*Viewed image\b/i.test(entry.title)) {
-    return null;
+): TimelineDetailPreview {
+  const images: TimelineDetailMediaPreview[] = [];
+  const textDetails: string[] = [];
+
+  if (/^•\s*Viewed image\b/i.test(entry.title)) {
+    const path = entry.details[0]?.trim();
+    if (path) {
+      const source = toMarkdownImageSource(path, bridgeUrl, bridgeToken);
+      if (source) {
+        images.push({
+          source,
+          accessibilityLabel: toPathBasename(path),
+        });
+      }
+    }
   }
 
-  const path = entry.details[0]?.trim();
-  if (!path) {
-    return null;
-  }
-
-  const source = toMarkdownImageSource(path, bridgeUrl, bridgeToken);
-  if (!source) {
-    return null;
+  for (const detail of entry.details) {
+    const inlineImage = toInlineImagePreviewFromMarkerLine(
+      detail,
+      bridgeUrl,
+      bridgeToken
+    );
+    if (inlineImage) {
+      images.push(inlineImage);
+      continue;
+    }
+    textDetails.push(detail);
   }
 
   return {
-    source,
-    accessibilityLabel: toPathBasename(path),
+    textDetails,
+    images,
   };
+}
+
+function toInlineImagePreviewFromMarkerLine(
+  line: string,
+  bridgeUrl: string | null,
+  bridgeToken: string | null
+): TimelineDetailMediaPreview | null {
+  const normalizedLine = line.trim();
+
+  const localImageMatch = normalizedLine.match(/^\[local image:\s*(.+?)\]$/i);
+  if (localImageMatch) {
+    const source = toMarkdownImageSource(localImageMatch[1], bridgeUrl, bridgeToken);
+    if (!source) {
+      return null;
+    }
+
+    return {
+      source,
+      accessibilityLabel: toPathBasename(localImageMatch[1]),
+    };
+  }
+
+  const remoteImageMatch = normalizedLine.match(/^\[image:\s*(.+?)\]$/i);
+  if (remoteImageMatch) {
+    const source = toMarkdownImageSource(remoteImageMatch[1], bridgeUrl, bridgeToken);
+    if (!source) {
+      return null;
+    }
+
+    return {
+      source,
+      accessibilityLabel: toPathBasename(remoteImageMatch[1]),
+    };
+  }
+
+  return null;
+}
+
+function isViewedImageEntry(title: string, textDetails: string[]): boolean {
+  return /^•\s*Viewed image\b/i.test(title) && textDetails.length > 0;
 }
 
 function toPathBasename(path: string): string {
   const normalizedPath = path.trim().replace(/\\/g, '/');
   if (!normalizedPath) {
+    return 'image';
+  }
+  if (/^data:image\//i.test(normalizedPath)) {
     return 'image';
   }
 
@@ -1625,8 +2578,12 @@ function summarizeReasoningPreview(details: string[]): string | null {
   return preview.length > 0 ? preview : null;
 }
 
+function stripLeadingTimelineBullet(title: string): string {
+  return title.trim().replace(/^[•\u2022]\s*/, '').trim();
+}
+
 function summarizeToolGroup(titles: string[]): string {
-  const normalized = titles.map((title) => title.trim().toLowerCase());
+  const normalized = titles.map((title) => stripLeadingTimelineBullet(title).toLowerCase());
   if (normalized.every((title) => title.startsWith('ran '))) {
     return `${String(titles.length)} command${titles.length === 1 ? '' : 's'}`;
   }
@@ -1639,7 +2596,221 @@ function summarizeToolGroup(titles: string[]): string {
   if (normalized.every((title) => title.startsWith('applied file changes'))) {
     return `${String(titles.length)} file change${titles.length === 1 ? '' : 's'}`;
   }
-  return `${String(titles.length)} tool call${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('reading'))) {
+    return `${String(titles.length)} file read${titles.length === 1 ? '' : 's'}`;
+  }
+  if (normalized.every((title) => title.startsWith('listing'))) {
+    return `${String(titles.length)} folder listing${titles.length === 1 ? '' : 's'}`;
+  }
+  if (normalized.every((title) => title.startsWith('explored'))) {
+    return `${String(titles.length)} exploration${titles.length === 1 ? '' : 's'}`;
+  }
+  return `${String(titles.length)} tool step${titles.length === 1 ? '' : 's'}`;
+}
+
+function toCursorActivityVisual(
+  rawTitle: string,
+  details: string[],
+  systemKind?: ApiChatMessage['systemKind']
+): {
+  title: string;
+  kind: 'thought' | 'terminal' | 'tool' | 'task' | 'git';
+  isRunning: boolean;
+  isError: boolean;
+} {
+  const normalized = rawTitle.toLowerCase();
+  const isError =
+    normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
+  const isRunning =
+    normalized.startsWith('calling ') ||
+    normalized.includes(' running') ||
+    normalized.includes('in progress') ||
+    normalized.startsWith('spawning ');
+  const toolName = readBacktickedText(rawTitle);
+  const title =
+    systemKind === 'reasoning'
+      ? 'Thought'
+      : systemKind === 'subAgent'
+        ? toCursorSubAgentTitle(rawTitle)
+        : toolName
+          ? toCursorToolTitle(toolName, details, isRunning, isError)
+          : toCursorPlainActivityTitle(rawTitle);
+
+  return {
+    title,
+    kind: toCursorActivityKind(rawTitle, toolName, systemKind),
+    isRunning,
+    isError,
+  };
+}
+
+function toCursorActivityPreview(
+  details: string[],
+  visual: ReturnType<typeof toCursorActivityVisual>
+): string | null {
+  const first = details.map((line) => line.trim()).find((line) => line.length > 0);
+  if (!first) {
+    return null;
+  }
+
+  if (visual.isError) {
+    return first.replace(/^(Error|Result|Output):\s*/i, '').trim();
+  }
+
+  if (visual.kind !== 'terminal') {
+    return null;
+  }
+
+  const command = first.replace(/^(Input|Command):\s*/i, '').trim();
+  return command ? `$ ${command}` : null;
+}
+
+function readBacktickedText(value: string): string | null {
+  const match = value.match(/`([^`]+)`/);
+  return match?.[1]?.trim() || null;
+}
+
+function toCursorToolTitle(
+  toolName: string,
+  details: string[],
+  isRunning: boolean,
+  isError: boolean
+): string {
+  const normalized = toolName.trim().toLowerCase().replace(/[^a-z0-9_./:-]+/g, '');
+  const target = cursorToolTargetLabel(details);
+  if (isError) {
+    return target ? `Failed ${formatCursorToolName(toolName)} on ${target}` : `${formatCursorToolName(toolName)} failed`;
+  }
+  switch (normalized) {
+    case 'read':
+      return target ? `Reading ${target}` : 'Reading file';
+    case 'grep':
+    case 'sem_search':
+    case 'semsearch':
+      return target ? `Searching ${target}` : 'Searching codebase';
+    case 'glob':
+      return target ? `Finding ${target}` : 'Finding files';
+    case 'ls':
+      return target ? `Listing ${target}` : 'Listing directory';
+    case 'shell':
+    case 'bash':
+    case 'terminal':
+      return isRunning ? 'Running terminal command' : 'Ran terminal command';
+    case 'edit':
+      return target ? `Editing ${target}` : 'Editing file';
+    case 'write':
+      return target ? `Writing ${target}` : 'Writing file';
+    case 'delete':
+      return target ? `Deleting ${target}` : 'Deleting file';
+    case 'read_lints':
+    case 'readlints':
+      return 'Checking diagnostics';
+    case 'update_todos':
+    case 'updatetodos':
+    case 'create_plan':
+    case 'createplan':
+      return 'Updating plan';
+    case 'take_screenshot':
+    case 'takescreenshot':
+    case 'screenshot':
+      return 'Taking screenshot';
+    case 'task':
+      return target ? `Running ${target}` : 'Running task';
+    case 'git':
+      return 'Updating git changes';
+    default:
+      return target
+        ? `${formatCursorToolName(toolName)} ${target}`
+        : formatCursorToolName(toolName);
+  }
+}
+
+function cursorToolTargetLabel(details: string[]): string | null {
+  const rawTarget =
+    details
+      .map((line) => line.trim())
+      .map((line) => line.replace(/^(Input|Path|File|Command|Query|Pattern):\s*/i, '').trim())
+      .find((line) => line.length > 0 && !line.startsWith('{') && !line.startsWith('[')) ??
+    null;
+  if (!rawTarget) {
+    return null;
+  }
+
+  const cleaned = rawTarget.replace(/^["']|["']$/g, '').trim();
+  if (!cleaned) {
+    return null;
+  }
+
+  const firstTarget = cleaned.split(/\s*,\s*/)[0] ?? cleaned;
+  if (/^[~/]|\.[A-Za-z0-9]{1,8}$/.test(firstTarget) || firstTarget.includes('/')) {
+    const basename = firstTarget.replace(/\\/g, '/').split('/').filter(Boolean).pop();
+    if (basename) {
+      return basename;
+    }
+  }
+
+  return cleaned.length > 64 ? `${cleaned.slice(0, 63)}…` : cleaned;
+}
+
+function formatCursorToolName(toolName: string): string {
+  const cleaned = toolName.trim().replace(/[_-]+/g, ' ');
+  if (!cleaned) {
+    return 'Tool call';
+  }
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function toCursorPlainActivityTitle(rawTitle: string): string {
+  const cleaned = rawTitle
+    .replace(/^(Calling tool|Called tool|Tool failed|Ran)\s+/i, '')
+    .replace(/`/g, '')
+    .trim();
+  if (!cleaned) {
+    return 'Tool call';
+  }
+  if (/^reasoning$/i.test(cleaned)) {
+    return 'Thought';
+  }
+  return cleaned;
+}
+
+function toCursorSubAgentTitle(rawTitle: string): string {
+  const normalized = rawTitle.toLowerCase();
+  if (normalized.includes('failed')) {
+    return 'Task failed';
+  }
+  if (normalized.includes('spawn')) {
+    return 'Started task';
+  }
+  if (normalized.includes('waiting')) {
+    return 'Waiting on task';
+  }
+  if (normalized.includes('closed')) {
+    return 'Closed task';
+  }
+  return 'Task';
+}
+
+function toCursorActivityKind(
+  rawTitle: string,
+  toolName: string | null,
+  systemKind: ApiChatMessage['systemKind'] | undefined
+): 'thought' | 'terminal' | 'tool' | 'task' | 'git' {
+  if (systemKind === 'reasoning') {
+    return 'thought';
+  }
+  if (systemKind === 'subAgent') {
+    return 'task';
+  }
+
+  const normalized = (toolName ?? rawTitle).toLowerCase();
+  if (normalized.includes('shell') || normalized.includes('bash') || normalized.includes('ran ')) {
+    return 'terminal';
+  }
+  if (normalized.includes('git')) {
+    return 'git';
+  }
+  return 'tool';
 }
 
 function toTimelineVisual(title: string): {
@@ -1647,7 +2818,7 @@ function toTimelineVisual(title: string): {
   useMonospaceTitle: boolean;
   isError: boolean;
 } {
-  const normalized = title.toLowerCase();
+  const normalized = stripLeadingTimelineBullet(title).toLowerCase();
   const isError =
     normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
 
@@ -1686,6 +2857,30 @@ function toTimelineVisual(title: string): {
   if (normalized.startsWith('searched web')) {
     return {
       icon: 'globe-outline',
+      useMonospaceTitle: false,
+      isError: false,
+    };
+  }
+
+  if (normalized.startsWith('reading')) {
+    return {
+      icon: 'eye-outline',
+      useMonospaceTitle: true,
+      isError: false,
+    };
+  }
+
+  if (normalized.startsWith('listing')) {
+    return {
+      icon: 'folder-open-outline',
+      useMonospaceTitle: false,
+      isError: false,
+    };
+  }
+
+  if (normalized.startsWith('applied file')) {
+    return {
+      icon: 'create-outline',
       useMonospaceTitle: false,
       isError: false,
     };

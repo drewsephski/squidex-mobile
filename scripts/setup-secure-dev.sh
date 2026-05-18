@@ -2,9 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -L)"
-ROOT_DIR="${INIT_CWD:-$(cd "$SCRIPT_DIR/.." && pwd -L)}"
-if [[ ! -f "$ROOT_DIR/package.json" ]]; then
-  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -L)"
+PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -L)"
+ROOT_DIR="${CLAWDEX_WORKSPACE_ROOT:-${INIT_CWD:-$(pwd -L)}}"
+if [[ ! -d "$ROOT_DIR" ]]; then
+  ROOT_DIR="$PACKAGE_ROOT"
 fi
 SECURE_ENV_FILE="$ROOT_DIR/.env.secure"
 MOBILE_ENV_FILE="$ROOT_DIR/apps/mobile/.env"
@@ -12,6 +13,11 @@ MOBILE_ENV_EXAMPLE="$ROOT_DIR/apps/mobile/.env.example"
 BRIDGE_ACTIVE_ENGINE="${BRIDGE_ACTIVE_ENGINE:-codex}"
 BRIDGE_ENABLED_ENGINES="${BRIDGE_ENABLED_ENGINES:-$BRIDGE_ACTIVE_ENGINE}"
 OPENCODE_CLI_BIN="${OPENCODE_CLI_BIN:-opencode}"
+CURSOR_APP_SERVER_BIN="${CURSOR_APP_SERVER_BIN:-cursor-app-server}"
+CURSOR_API_KEY="${CURSOR_API_KEY:-}"
+CURSOR_MODEL="${CURSOR_MODEL:-}"
+BRIDGE_CONNECT_URL=""
+BRIDGE_PREVIEW_CONNECT_URL=""
 
 upsert_env_key() {
   local file="$1"
@@ -230,10 +236,10 @@ case "$BRIDGE_NETWORK_MODE" in
 esac
 
 case "$BRIDGE_ACTIVE_ENGINE" in
-  codex|opencode)
+  codex|opencode|cursor)
     ;;
   *)
-    echo "error: BRIDGE_ACTIVE_ENGINE must be 'codex' or 'opencode'." >&2
+    echo "error: BRIDGE_ACTIVE_ENGINE must be 'codex', 'opencode', or 'cursor'." >&2
     exit 1
     ;;
 esac
@@ -253,7 +259,7 @@ validate_enabled_engines() {
       continue
     fi
     case "$normalized" in
-      codex|opencode)
+      codex|opencode|cursor)
         ;;
       *)
         return 1
@@ -275,7 +281,7 @@ validate_enabled_engines() {
 }
 
 if ! validate_enabled_engines "$BRIDGE_ENABLED_ENGINES"; then
-  echo "error: BRIDGE_ENABLED_ENGINES must contain one or more of 'codex' and 'opencode'." >&2
+  echo "error: BRIDGE_ENABLED_ENGINES must contain one or more of 'codex', 'opencode', and 'cursor'." >&2
   exit 1
 fi
 
@@ -301,6 +307,14 @@ else
 fi
 
 BRIDGE_PORT="${BRIDGE_PORT_OVERRIDE:-8787}"
+BRIDGE_PREVIEW_PORT="${BRIDGE_PREVIEW_PORT_OVERRIDE:-$((BRIDGE_PORT + 1))}"
+if [[ "$BRIDGE_PREVIEW_PORT" == "$BRIDGE_PORT" ]]; then
+  echo "error: BRIDGE_PREVIEW_PORT must differ from BRIDGE_PORT." >&2
+  exit 1
+fi
+
+BRIDGE_CONNECT_URL="http://$BRIDGE_HOST:$BRIDGE_PORT"
+BRIDGE_PREVIEW_CONNECT_URL="http://$BRIDGE_HOST:$BRIDGE_PREVIEW_PORT"
 
 EXISTING_TOKEN=""
 if [[ -f "$SECURE_ENV_FILE" ]]; then
@@ -316,12 +330,18 @@ cat > "$SECURE_ENV_FILE" <<EOT
 BRIDGE_NETWORK_MODE=$BRIDGE_NETWORK_MODE
 BRIDGE_HOST=$BRIDGE_HOST
 BRIDGE_PORT=$BRIDGE_PORT
+BRIDGE_PREVIEW_PORT=$BRIDGE_PREVIEW_PORT
+BRIDGE_CONNECT_URL=$BRIDGE_CONNECT_URL
+BRIDGE_PREVIEW_CONNECT_URL=$BRIDGE_PREVIEW_CONNECT_URL
 BRIDGE_AUTH_TOKEN=$BRIDGE_TOKEN
 BRIDGE_ALLOW_QUERY_TOKEN_AUTH=true
 BRIDGE_ACTIVE_ENGINE=$BRIDGE_ACTIVE_ENGINE
 BRIDGE_ENABLED_ENGINES=$BRIDGE_ENABLED_ENGINES
 CODEX_CLI_BIN=codex
 OPENCODE_CLI_BIN=$OPENCODE_CLI_BIN
+CURSOR_APP_SERVER_BIN=$CURSOR_APP_SERVER_BIN
+CURSOR_API_KEY=$CURSOR_API_KEY
+CURSOR_MODEL=$CURSOR_MODEL
 BRIDGE_WORKDIR=$ROOT_DIR
 EOT
 
@@ -333,6 +353,7 @@ if has_local_mobile_workspace; then
   upsert_env_key "$MOBILE_ENV_FILE" "EXPO_PUBLIC_MAC_BRIDGE_TOKEN" "$BRIDGE_TOKEN"
   upsert_env_key "$MOBILE_ENV_FILE" "EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH" "true"
   upsert_env_key "$MOBILE_ENV_FILE" "EXPO_PUBLIC_ALLOW_INSECURE_REMOTE_BRIDGE" "true"
+  chmod 600 "$MOBILE_ENV_FILE"
 fi
 
 echo "Secure dev setup complete."
@@ -340,6 +361,7 @@ echo ""
 echo "Bridge network mode: $BRIDGE_NETWORK_MODE"
 echo "Bridge host: $BRIDGE_HOST ($HOST_SOURCE)"
 echo "Bridge port: $BRIDGE_PORT"
+echo "Bridge connect URL: $BRIDGE_CONNECT_URL"
 echo "Harnesses: $BRIDGE_ENABLED_ENGINES"
 echo "Token source: $SECURE_ENV_FILE"
 if has_local_mobile_workspace; then

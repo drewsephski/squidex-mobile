@@ -18,9 +18,15 @@ export type RawThreadStatus =
 export interface RawTurn {
   id?: string;
   status?: string;
-  error?: {
-    message?: string;
-  } | null;
+  error?: unknown;
+  message?: unknown;
+  errorMessage?: unknown;
+  error_message?: unknown;
+  detail?: unknown;
+  details?: unknown;
+  reason?: unknown;
+  description?: unknown;
+  stderr?: unknown;
   items?: RawThreadItem[];
 }
 
@@ -86,7 +92,18 @@ function readStringArray(value: unknown): string[] {
 }
 
 function readNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const numeric = Number(value.trim());
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return null;
 }
 
 function readFileChangePaths(item: Record<string, unknown>): string[] {
@@ -123,11 +140,7 @@ export function toPreview(value: string): string {
   return `${collapsed.slice(0, 177)}...`;
 }
 
-function unixSecondsToIso(value: number | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return new Date().toISOString();
-  }
-
+function unixSecondsToIso(value: number): string {
   return new Date(value * 1000).toISOString();
 }
 
@@ -138,6 +151,43 @@ function normalizeLifecycleStatus(value: string | null | undefined): string | nu
 
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   return normalized.length > 0 ? normalized : null;
+}
+
+function readErrorMessage(value: unknown, depth = 0): string | null {
+  if (depth > 3) {
+    return null;
+  }
+
+  const direct = readString(value)?.trim();
+  if (direct) {
+    return direct;
+  }
+
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const fields = [
+    record.message,
+    record.errorMessage,
+    record.error_message,
+    record.detail,
+    record.details,
+    record.reason,
+    record.description,
+    record.stderr,
+    record.error,
+  ];
+
+  for (const field of fields) {
+    const message = readErrorMessage(field, depth + 1);
+    if (message) {
+      return message;
+    }
+  }
+
+  return null;
 }
 
 function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus {
@@ -169,7 +219,9 @@ function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus
     lastTurnStatus === 'failed' ||
     lastTurnStatus === 'interrupted' ||
     lastTurnStatus === 'error' ||
-    lastTurnStatus === 'aborted'
+    lastTurnStatus === 'aborted' ||
+    lastTurnStatus === 'cancelled' ||
+    lastTurnStatus === 'canceled'
   ) {
     return 'error';
   }
@@ -216,12 +268,28 @@ function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus
 function extractLastError(turns: RawTurn[]): string | null {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
-    const turnStatus = readString(turn.status);
-    if (turnStatus !== 'failed' && turnStatus !== 'interrupted') {
+    const turnStatus = normalizeLifecycleStatus(readString(turn.status));
+    if (
+      turnStatus !== 'failed' &&
+      turnStatus !== 'interrupted' &&
+      turnStatus !== 'error' &&
+      turnStatus !== 'aborted' &&
+      turnStatus !== 'cancelled' &&
+      turnStatus !== 'canceled'
+    ) {
       continue;
     }
 
-    const message = readString(turn.error?.message);
+    const message =
+      readErrorMessage(turn.error) ??
+      readErrorMessage(turn.message) ??
+      readErrorMessage(turn.errorMessage) ??
+      readErrorMessage(turn.error_message) ??
+      readErrorMessage(turn.detail) ??
+      readErrorMessage(turn.details) ??
+      readErrorMessage(turn.reason) ??
+      readErrorMessage(turn.description) ??
+      readErrorMessage(turn.stderr);
     if (message) {
       return message;
     }
@@ -281,7 +349,15 @@ function toRawTurn(value: unknown): RawTurn | null {
   return {
     id: readString(record.id) ?? undefined,
     status: readString(record.status) ?? undefined,
-    error: toRecord(record.error) as { message?: string } | null,
+    error: record.error,
+    message: record.message,
+    errorMessage: record.errorMessage,
+    error_message: record.error_message,
+    detail: record.detail,
+    details: record.details,
+    reason: record.reason,
+    description: record.description,
+    stderr: record.stderr,
     items,
   };
 }
@@ -291,13 +367,21 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
     return null;
   }
 
-  const createdAt = unixSecondsToIso(raw.createdAt);
-  const updatedAt = unixSecondsToIso(raw.updatedAt);
+  const createdAtSeconds = raw.createdAt ?? raw.updatedAt ?? 0;
+  const updatedAtSeconds = raw.updatedAt ?? raw.createdAt ?? createdAtSeconds;
+  const createdAt = unixSecondsToIso(createdAtSeconds);
+  const updatedAt = unixSecondsToIso(updatedAtSeconds);
   const turns = Array.isArray(raw.turns) ? raw.turns : [];
   const sourceMetadata = readThreadSourceMetadata(raw.source);
 
   const lastError = extractLastError(turns);
-  const displayTitle = raw.name ?? raw.preview;
+  const previewTitle = toPreview(raw.preview || '');
+  const firstUserTitle = firstUserMessagePreview(turns);
+  const rawTitle = raw.name?.trim() || null;
+  const displayTitle =
+    rawTitle && !isGeneratedCursorThreadTitle(rawTitle, raw.id, raw.engine)
+      ? rawTitle
+      : previewTitle || firstUserTitle || rawTitle;
 
   return {
     id: raw.id,
@@ -319,9 +403,94 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
   };
 }
 
+export function isGeneratedCursorThreadTitle(
+  title: string | null | undefined,
+  threadId: string | null | undefined,
+  engine?: unknown
+): boolean {
+  const value = title?.trim().toLowerCase();
+  if (!value) {
+    return true;
+  }
+
+  const normalizedThreadId = threadId?.trim().toLowerCase() ?? '';
+  const isCursorThread =
+    readChatEngine(engine) === 'cursor' ||
+    normalizedThreadId.startsWith('cursor:') ||
+    value.startsWith('chat cursor:') ||
+    value.startsWith('cursor agent');
+  if (!isCursorThread) {
+    return false;
+  }
+
+  if (
+    value === 'new agent' ||
+    value === 'cursor agent' ||
+    value === 'untitled' ||
+    value === 'untitled agent'
+  ) {
+    return true;
+  }
+
+  const unqualifiedThreadId = normalizedThreadId.replace(/^cursor:/u, '');
+  const threadPrefix = unqualifiedThreadId.slice(0, 8);
+  return (
+    (Boolean(threadPrefix) && value === `cursor ${threadPrefix}`) ||
+    value === `cursor ${normalizedThreadId}` ||
+    value === `cursor ${unqualifiedThreadId}` ||
+    value === `chat ${normalizedThreadId}` ||
+    value === `chat cursor:${unqualifiedThreadId}` ||
+    /^chat\s+cursor:[a-z0-9_-]+$/u.test(value) ||
+    /^cursor\s+agent[-\s][0-9a-f]{2,}/u.test(value)
+  );
+}
+
+function firstUserMessagePreview(turns: RawTurn[]): string | null {
+  for (const turn of turns) {
+    for (const item of turn.items ?? []) {
+      if (item.type !== 'userMessage') {
+        continue;
+      }
+      const text = readThreadItemText(item);
+      const preview = toPreview(text);
+      if (preview) {
+        return preview;
+      }
+    }
+  }
+
+  return null;
+}
+
+function readThreadItemText(item: RawThreadItem): string {
+  const record = toRecord(item);
+  const text = readString(record?.text);
+  if (text) {
+    return text;
+  }
+
+  const content = Array.isArray(record?.content) ? record.content : [];
+  if (content.length === 0) {
+    return '';
+  }
+
+  return content
+    .map((entry) => {
+      const contentEntry = toRecord(entry);
+      return readString(contentEntry?.type) === 'text'
+        ? readString(contentEntry?.text) ?? ''
+        : '';
+    })
+    .filter((entry) => entry.length > 0)
+    .join('');
+}
+
 function readChatEngine(value: unknown): ChatEngine {
   const normalized = normalizeLifecycleStatus(readString(value));
-  return normalized === 'opencode' ? 'opencode' : 'codex';
+  if (normalized === 'opencode' || normalized === 'cursor') {
+    return normalized;
+  }
+  return 'codex';
 }
 
 function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata {
@@ -561,8 +730,9 @@ function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMessage[] {
       }
 
       const itemType = readString(itemRecord.type);
+      const normalizedItemType = normalizeType(itemType ?? '');
 
-      if (itemType === 'userMessage') {
+      if (normalizedItemType === 'usermessage') {
         const text = stringifyStructuredMessageContent(itemRecord);
 
         if (!text.trim()) {
@@ -578,7 +748,7 @@ function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMessage[] {
         continue;
       }
 
-      if (itemType === 'agentMessage') {
+      if (normalizedItemType === 'agentmessage') {
         const text =
           stringifyStructuredMessageContent(itemRecord) || readString(itemRecord.text) || '';
         if (!text.trim()) {
@@ -597,11 +767,11 @@ function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMessage[] {
       const toolLikeMessage = toToolLikeMessage(itemRecord);
       if (toolLikeMessage) {
         const systemKind =
-          itemType === 'collabToolCall'
+          normalizedItemType === 'collabtoolcall'
             ? 'subAgent'
-            : itemType === 'reasoning'
+            : normalizedItemType === 'reasoning'
               ? 'reasoning'
-              : itemType === 'contextCompaction'
+              : normalizedItemType === 'contextcompaction'
                 ? 'compaction'
               : 'tool';
         messages.push({
@@ -625,35 +795,7 @@ function stringifyStructuredMessageContent(itemRecord: Record<string, unknown>):
     return '';
   }
 
-  return contentItems
-    .map((entry: unknown) => {
-      const entryRecord = toRecord(entry);
-      if (!entryRecord) {
-        return '';
-      }
-
-      const entryType = readString(entryRecord.type);
-      if (entryType === 'text') {
-        return readString(entryRecord.text) ?? '';
-      }
-
-      if (entryType === 'image') {
-        return `[image: ${readString(entryRecord.url) ?? 'unknown'}]`;
-      }
-
-      if (entryType === 'localImage') {
-        return `[local image: ${readString(entryRecord.path) ?? 'unknown'}]`;
-      }
-
-      if (entryType === 'mention') {
-        const mentionPath = readString(entryRecord.path) ?? 'unknown';
-        return `[file: ${mentionPath}]`;
-      }
-
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  return stringifyStructuredContentEntries(contentItems);
 }
 
 function generateLocalId(): string {
@@ -856,6 +998,39 @@ function toToolLikeMessage(item: Record<string, unknown>): string | null {
     return withNestedDetail(title, detail);
   }
 
+  if (type === 'toolcall') {
+    const tool = normalizeInline(readString(item.tool) ?? readString(item.name), 120) ?? 'unknown';
+    const status = normalizeType(readString(item.status) ?? '');
+    const title =
+      status === 'failed' || status === 'error'
+        ? `• Tool failed \`${tool}\``
+        : status === 'running' || status === 'inprogress'
+          ? `• Calling tool \`${tool}\``
+          : `• Called tool \`${tool}\``;
+    const argsDetail = toCursorToolArgsPreview(item);
+    const resultDetail = toCursorToolResultPreview(item.result);
+    const detail = [argsDetail ? `Input: ${argsDetail}` : null, resultDetail]
+      .filter(Boolean)
+      .join('\n');
+    return withNestedDetail(title, detail || null);
+  }
+
+  if (type === 'functioncall' || type === 'customtoolcall') {
+    return toFunctionToolLikeMessage(item);
+  }
+
+  if (type === 'functioncalloutput' || type === 'customtoolcalloutput') {
+    const output =
+      normalizeMultiline(readString(item.output), 2400) ??
+      toStructuredPreview(item.output, 1200);
+    if (!output) {
+      return null;
+    }
+    const callId = normalizeInline(readString(item.call_id) ?? readString(item.callId), 120);
+    const title = callId ? `• Tool output \`${callId}\`` : '• Tool output';
+    return withNestedDetail(title, toNestedOutput(output, 8, 1600));
+  }
+
   if (type === 'collabtoolcall') {
     const tool = normalizeType(readString(item.tool) ?? '');
     const status = normalizeType(readString(item.status) ?? '');
@@ -981,6 +1156,238 @@ function toToolLikeMessage(item: Record<string, unknown>): string | null {
   return null;
 }
 
+function toFunctionToolLikeMessage(item: Record<string, unknown>): string | null {
+  const rawName =
+    readString(item.name) ??
+    readString(item.tool) ??
+    readString(item.function) ??
+    readString(item.function_name);
+  const toolName = normalizeInline(rawName, 160) ?? 'tool';
+  const normalizedToolName = toolName.replace(/^functions\./, '');
+  const status = normalizeType(readString(item.status) ?? '');
+  const args = readFunctionToolArguments(item);
+  const inputPreview = args ? toStructuredPreview(args, 900) : readFunctionToolInput(item);
+
+  if (normalizedToolName === 'exec_command') {
+    const command = readFunctionCommand(args) ?? normalizeInline(readFunctionToolInput(item), 240);
+    const title =
+      status === 'failed' || status === 'error'
+        ? `• Command failed \`${command ?? 'command'}\``
+        : status === 'running' || status === 'inprogress'
+          ? `• Running command \`${command ?? 'command'}\``
+          : `• Ran \`${command ?? 'command'}\``;
+    const workdir = normalizeInline(readString(args?.workdir), 220);
+    return withNestedDetail(title, workdir ? `cwd: ${workdir}` : null);
+  }
+
+  const mcpToolName = parseMcpFunctionToolName(normalizedToolName);
+  if (mcpToolName) {
+    const title =
+      status === 'failed' || status === 'error'
+        ? `• Tool failed \`${mcpToolName.server} / ${mcpToolName.tool}\``
+        : status === 'running' || status === 'inprogress'
+          ? `• Calling tool \`${mcpToolName.server} / ${mcpToolName.tool}\``
+          : `• Called tool \`${mcpToolName.server} / ${mcpToolName.tool}\``;
+    return withNestedDetail(title, inputPreview ? `Input: ${inputPreview}` : null);
+  }
+
+  if (normalizedToolName === 'search_query' || normalizedToolName === 'image_query') {
+    const query = normalizeInline(readFunctionSearchQuery(args), 180);
+    const title = query ? `• Searched web for "${query}"` : '• Searched web';
+    return withNestedDetail(title, null);
+  }
+
+  if (normalizedToolName === 'apply_patch') {
+    const patchInput = readFunctionToolInput(item);
+    const changedPaths = patchInput ? readPatchTargetPaths(patchInput) : [];
+    const detail = changedPaths.length > 0 ? changedPaths.join('\n') : null;
+    const title =
+      changedPaths.length === 0
+        ? '• Applied file changes'
+        : changedPaths.length === 1
+          ? `• Applied file changes to ${toFileChangeTargetLabel(changedPaths[0])}`
+          : `• Applied file changes to ${toFileChangeTargetLabel(changedPaths[0])} +${String(changedPaths.length - 1)} more`;
+    return withNestedDetail(title, detail);
+  }
+
+  const title =
+    status === 'failed' || status === 'error'
+      ? `• Tool failed \`${normalizedToolName}\``
+      : status === 'running' || status === 'inprogress'
+        ? `• Calling tool \`${normalizedToolName}\``
+        : `• Called tool \`${normalizedToolName}\``;
+  return withNestedDetail(title, inputPreview ? `Input: ${inputPreview}` : null);
+}
+
+function readFunctionToolArguments(item: Record<string, unknown>): Record<string, unknown> | null {
+  return (
+    toRecord(item.arguments) ??
+    toRecord(item.args) ??
+    parseJsonObject(readString(item.arguments)) ??
+    parseJsonObject(readString(item.args))
+  );
+}
+
+function readFunctionToolInput(item: Record<string, unknown>): string | null {
+  return (
+    normalizeMultiline(readString(item.input), 1800) ??
+    normalizeMultiline(readString(item.arguments), 1800) ??
+    normalizeMultiline(readString(item.args), 1800)
+  );
+}
+
+function readFunctionCommand(args: Record<string, unknown> | null): string | null {
+  if (!args) {
+    return null;
+  }
+
+  const direct =
+    normalizeInline(readString(args.cmd), 240) ??
+    normalizeInline(readString(args.command), 240);
+  if (direct) {
+    return direct;
+  }
+
+  const commandParts = readStringArray(args.cmd).concat(readStringArray(args.command));
+  return commandParts.length > 0 ? normalizeInline(commandParts.join(' '), 240) : null;
+}
+
+function parseMcpFunctionToolName(name: string): { server: string; tool: string } | null {
+  const segments = name.split('__').filter(Boolean);
+  if (segments.length < 3 || segments[0] !== 'mcp') {
+    return null;
+  }
+
+  const [, server, ...toolParts] = segments;
+  const tool = toolParts.join('__');
+  if (!server || !tool) {
+    return null;
+  }
+
+  return { server, tool };
+}
+
+function readFunctionSearchQuery(args: Record<string, unknown> | null): string | null {
+  if (!args) {
+    return null;
+  }
+
+  const direct = readString(args.q) ?? readString(args.query);
+  if (direct) {
+    return direct;
+  }
+
+  const searchQueries = Array.isArray(args.search_query)
+    ? args.search_query
+    : Array.isArray(args.image_query)
+      ? args.image_query
+      : [];
+  for (const entry of searchQueries) {
+    const query = readString(toRecord(entry)?.q) ?? readString(toRecord(entry)?.query);
+    if (query) {
+      return query;
+    }
+  }
+
+  return null;
+}
+
+function readPatchTargetPaths(input: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const patterns = [
+    /^\*\*\* Update File:\s+(.+)$/gm,
+    /^\*\*\* Move to:\s+(.+)$/gm,
+    /^\*\*\* Add File:\s+(.+)$/gm,
+    /^\*\*\* Delete File:\s+(.+)$/gm,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of input.matchAll(pattern)) {
+      const path = match[1]?.trim();
+      if (!path || seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      paths.push(path);
+    }
+  }
+
+  return paths;
+}
+
+function toCursorToolArgsPreview(item: Record<string, unknown>): string | null {
+  const args = toRecord(item.args);
+  if (!args) {
+    return toStructuredPreview(item.args, 320);
+  }
+
+  const directTarget =
+    normalizeInline(readString(args.path), 180) ??
+    normalizeInline(readString(args.filePath), 180) ??
+    normalizeInline(readString(args.file_path), 180) ??
+    normalizeInline(readString(args.globPattern), 180) ??
+    normalizeInline(readString(args.glob_pattern), 180) ??
+    normalizeInline(readString(args.command), 220);
+  if (directTarget) {
+    return directTarget;
+  }
+
+  return toStructuredPreview(args, 320);
+}
+
+function toCursorToolResultPreview(value: unknown): string | null {
+  const record = toRecord(value);
+  const status = normalizeType(readString(record?.status) ?? '');
+  const isError = status === 'error' || status === 'failed';
+  const gitPreview = toCursorGitResultPreview(record ?? toRecord(toRecord(value)?.value));
+  if (gitPreview) {
+    return gitPreview;
+  }
+  const preview = toStructuredPreview(record?.value ?? record?.result ?? value, 600);
+  if (isError) {
+    const error =
+      normalizeMultiline(readString(record?.error), 600) ??
+      normalizeMultiline(readString(toRecord(record?.error)?.message), 600);
+    return error ? `Error: ${error}` : preview;
+  }
+  return preview;
+}
+
+function toCursorGitResultPreview(record: Record<string, unknown> | null): string | null {
+  const rawBranches = Array.isArray(record?.branches) ? record.branches : [];
+  if (rawBranches.length === 0) {
+    return null;
+  }
+
+  const lines = rawBranches
+    .map((entry) => {
+      const branchRecord = toRecord(entry);
+      if (!branchRecord) {
+        return null;
+      }
+      const branch = normalizeInline(readString(branchRecord.branch), 180);
+      const prUrl = normalizeInline(
+        readString(branchRecord.prUrl) ?? readString(branchRecord.pr_url),
+        220
+      );
+      const repoUrl = normalizeInline(
+        readString(branchRecord.repoUrl) ?? readString(branchRecord.repo_url),
+        220
+      );
+      return [
+        branch ? `Branch: ${branch}` : null,
+        prUrl ? `PR: ${prUrl}` : null,
+        repoUrl ? `Repo: ${repoUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })
+    .filter((line): line is string => Boolean(line));
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 function toSubAgentMeta(item: Record<string, unknown>): ChatMessageSubAgentMeta | undefined {
   const tool = readString(item.tool) ?? undefined;
   const prompt = normalizeInline(readString(item.prompt), 4000) ?? undefined;
@@ -1041,9 +1448,23 @@ function reasoningTextFromItem(item: Record<string, unknown>): string | null {
     return content.join('\n');
   }
 
+  if (Array.isArray(item.content)) {
+    const structuredContent = stringifyStructuredContentEntries(item.content);
+    if (structuredContent.trim()) {
+      return structuredContent;
+    }
+  }
+
   const summary = readStringArray(item.summary);
   if (summary.length > 0) {
     return summary.join('\n');
+  }
+
+  if (Array.isArray(item.summary)) {
+    const structuredSummary = stringifyStructuredContentEntries(item.summary);
+    if (structuredSummary.trim()) {
+      return structuredSummary;
+    }
   }
 
   return null;
@@ -1051,6 +1472,18 @@ function reasoningTextFromItem(item: Record<string, unknown>): string | null {
 
 function normalizeType(value: string): string {
   return value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return toRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function normalizeInline(value: string | null, maxChars: number): string | null {
@@ -1149,8 +1582,13 @@ function toStructuredPreview(value: unknown, maxChars: number): string | null {
     return null;
   }
 
+  const structuredPreview = toStructuredContentPreview(value, maxChars);
+  if (structuredPreview) {
+    return structuredPreview;
+  }
+
   if (typeof value === 'string') {
-    return normalizeInline(value, maxChars);
+    return normalizeMultiline(value, maxChars);
   }
 
   try {
@@ -1159,4 +1597,204 @@ function toStructuredPreview(value: unknown, maxChars: number): string | null {
   } catch {
     return null;
   }
+}
+
+function stringifyStructuredContentEntries(entries: unknown[]): string {
+  return entries.flatMap((entry) => stringifyStructuredContentEntry(entry)).join('\n');
+}
+
+function stringifyStructuredContentEntry(entry: unknown): string[] {
+  const entryRecord = toRecord(entry);
+  if (!entryRecord) {
+    const text = readString(entry)?.trim();
+    return text ? [text] : [];
+  }
+
+  const entryType = normalizeType(readString(entryRecord.type) ?? '');
+  if (
+    entryType === 'text' ||
+    entryType === 'inputtext' ||
+    entryType === 'outputtext' ||
+    entryType === 'summarytext'
+  ) {
+    const text = readStructuredText(entryRecord);
+    return text ? [text] : [];
+  }
+
+  if (entryType === 'image' || entryType === 'inputimage') {
+    const localImagePath = readStructuredLocalImagePath(entryRecord);
+    if (localImagePath) {
+      return [`[local image: ${localImagePath}]`];
+    }
+
+    const imageUrl = readStructuredImageUrl(entryRecord);
+    return imageUrl ? [`[image: ${imageUrl}]`] : [];
+  }
+
+  if (entryType === 'localimage') {
+    const localImagePath = readStructuredLocalImagePath(entryRecord);
+    if (localImagePath) {
+      return [`[local image: ${localImagePath}]`];
+    }
+
+    const imageUrl = readStructuredImageUrl(entryRecord);
+    return imageUrl ? [`[image: ${imageUrl}]`] : [];
+  }
+
+  if (entryType === 'mention') {
+    const mentionPath = readStructuredMentionPath(entryRecord);
+    return mentionPath ? [`[file: ${mentionPath}]`] : [];
+  }
+
+  return [];
+}
+
+function readStructuredText(entryRecord: Record<string, unknown>): string | null {
+  return (
+    readString(entryRecord.text)?.trim() ??
+    readString(toRecord(entryRecord.data)?.text)?.trim() ??
+    null
+  );
+}
+
+function readStructuredImageUrl(entryRecord: Record<string, unknown>): string | null {
+  const data = toRecord(entryRecord.data);
+  const inlineImageData =
+    readString(entryRecord.data)?.trim() ??
+    readString(data?.data)?.trim() ??
+    null;
+  const inlineImageMimeType =
+    readString(entryRecord.mimeType)?.trim() ??
+    readString(entryRecord.mime_type)?.trim() ??
+    readString(data?.mimeType)?.trim() ??
+    readString(data?.mime_type)?.trim() ??
+    null;
+
+  if (inlineImageData && inlineImageMimeType) {
+    return `data:${inlineImageMimeType};base64,${inlineImageData}`;
+  }
+
+  return (
+    readString(entryRecord.url)?.trim() ??
+    readString(entryRecord.image_url)?.trim() ??
+    readString(entryRecord.imageUrl)?.trim() ??
+    readString(data?.url)?.trim() ??
+    readString(data?.image_url)?.trim() ??
+    readString(data?.imageUrl)?.trim() ??
+    null
+  );
+}
+
+function readStructuredLocalImagePath(entryRecord: Record<string, unknown>): string | null {
+  const data = toRecord(entryRecord.data);
+  return readString(entryRecord.path)?.trim() ?? readString(data?.path)?.trim() ?? null;
+}
+
+function readStructuredMentionPath(entryRecord: Record<string, unknown>): string | null {
+  const data = toRecord(entryRecord.data);
+  return readString(entryRecord.path)?.trim() ?? readString(data?.path)?.trim() ?? null;
+}
+
+function toStructuredContentPreview(value: unknown, maxChars: number): string | null {
+  const lines = extractStructuredContentPreviewLines(value);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const previewLines: string[] = [];
+  let remainingChars = maxChars;
+  let textLineCount = 0;
+  let mediaLineCount = 0;
+
+  for (const line of lines) {
+    if (isImageMarker(line)) {
+      if (mediaLineCount >= 3) {
+        break;
+      }
+      previewLines.push(line);
+      mediaLineCount += 1;
+      continue;
+    }
+
+    if (textLineCount >= 8 || remainingChars <= 0) {
+      break;
+    }
+
+    const normalizedLine = normalizeMultiline(line, remainingChars);
+    if (!normalizedLine) {
+      continue;
+    }
+
+    previewLines.push(normalizedLine);
+    textLineCount += 1;
+    remainingChars -= normalizedLine.length;
+  }
+
+  return previewLines.length > 0 ? previewLines.join('\n') : null;
+}
+
+function extractStructuredContentPreviewLines(
+  value: unknown,
+  depth = 0
+): string[] {
+  if (depth > 3 || value == null) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    const directLines = value.flatMap((entry) => stringifyStructuredContentEntry(entry));
+    if (directLines.length > 0) {
+      return directLines;
+    }
+
+    for (const entry of value) {
+      const nestedLines = extractStructuredContentPreviewLines(entry, depth + 1);
+      if (nestedLines.length > 0) {
+        return nestedLines;
+      }
+    }
+
+    return [];
+  }
+
+  const directLines = stringifyStructuredContentEntry(value);
+  if (directLines.length > 0) {
+    return directLines;
+  }
+
+  const record = toRecord(value);
+  if (!record) {
+    return [];
+  }
+
+  const candidateKeys = [
+    'content',
+    'contents',
+    'items',
+    'item',
+    'result',
+    'results',
+    'output',
+    'data',
+    'structuredContent',
+    'structured_content',
+    '_meta',
+    'meta',
+  ];
+  for (const key of candidateKeys) {
+    if (!(key in record)) {
+      continue;
+    }
+
+    const nestedLines = extractStructuredContentPreviewLines(record[key], depth + 1);
+    if (nestedLines.length > 0) {
+      return nestedLines;
+    }
+  }
+
+  return [];
+}
+
+function isImageMarker(value: string): boolean {
+  return /^\[(?:image|local image):\s*.+?\]$/i.test(value.trim());
 }

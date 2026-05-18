@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -24,6 +26,8 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { HostBridgeApiClient } from '../api/client';
+import { toRecord } from '../api/chatMapping';
+import { readAccountRateLimitSnapshot } from '../api/rateLimits';
 import type {
   AccountSnapshot,
   AccountRateLimitSnapshot,
@@ -31,14 +35,23 @@ import type {
   BridgeCapabilities,
   BridgeRuntimeInfo,
   ChatEngine,
+  CursorCredentialStatus,
   EngineDefaultSettingsMap,
   ModelOption,
   PlanType,
   ReasoningEffort,
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
+import clawdexMark from '../../assets/brand/mark.png';
 import type { BridgeProfile } from '../bridgeProfiles';
+import { BridgeProfileManagerSheet } from '../components/bridge-profile-manager-sheet';
 import { SelectionSheet, type SelectionSheetOption } from '../components/SelectionSheet';
+import {
+  DEFAULT_WORKSPACE_CHAT_LIMIT,
+  formatWorkspaceChatLimit,
+  WORKSPACE_CHAT_LIMIT_OPTIONS,
+  type WorkspaceChatLimit,
+} from '../appSettings';
 import {
   buildComposerUsageLimitBadges,
   formatComposerUsageLimitResetAt,
@@ -60,6 +73,7 @@ import {
   useAppTheme,
   type AppearancePreference,
   type AppTheme,
+  type DarkUiPalette,
 } from '../theme';
 import {
   getTipJarUnavailableReason,
@@ -81,7 +95,6 @@ import {
 interface SettingsScreenProps {
   api: HostBridgeApiClient;
   ws: HostBridgeWsClient;
-  bridgeUrl: string;
   activeBridgeProfileId?: string | null;
   bridgeProfileName: string;
   bridgeProfiles: BridgeProfile[];
@@ -89,7 +102,9 @@ interface SettingsScreenProps {
   defaultEngineSettings?: EngineDefaultSettingsMap | null;
   approvalMode?: ApprovalMode;
   showToolCalls?: boolean;
+  workspaceChatLimit?: WorkspaceChatLimit;
   appearancePreference?: AppearancePreference;
+  darkUiPalette?: DarkUiPalette;
   fontPreference?: FontPreference;
   onDefaultChatEngineChange?: (engine: ChatEngine) => void;
   onDefaultModelSettingsChange?: (
@@ -99,15 +114,18 @@ interface SettingsScreenProps {
   ) => void;
   onApprovalModeChange?: (mode: ApprovalMode) => void;
   onShowToolCallsChange?: (value: boolean) => void;
+  onWorkspaceChatLimitChange?: (limit: WorkspaceChatLimit) => void;
   onAppearancePreferenceChange?: (preference: AppearancePreference) => void;
+  onDarkUiPaletteChange?: (palette: DarkUiPalette) => void;
   onFontPreferenceChange?: (preference: FontPreference) => void;
   onEditBridgeProfile?: () => void;
   onAddBridgeProfile?: () => void;
   onSwitchBridgeProfile?: (profileId: string) => void | Promise<void>;
+  onRenameBridgeProfile?: (profileId: string, nextName: string) => void | Promise<void>;
+  onDeleteBridgeProfile?: (profileId: string) => void | Promise<void>;
   onClearSavedBridges?: () => void | Promise<void>;
   onOpenDrawer: () => void;
   onDrawerGestureEnabledChange?: (enabled: boolean) => void;
-  onOpenBrowser?: () => void;
   onOpenPrivacy: () => void;
   onOpenTerms: () => void;
 }
@@ -118,6 +136,7 @@ type SettingsRoute =
   | 'account'
   | 'limits'
   | 'bridge'
+  | 'engines'
   | 'appearance'
   | 'tips'
   | 'legal';
@@ -133,7 +152,6 @@ type SettingsRouteTransitionDirection = 'forward' | 'backward';
 export function SettingsScreen({
   api,
   ws,
-  bridgeUrl,
   activeBridgeProfileId = null,
   bridgeProfileName,
   bridgeProfiles,
@@ -142,20 +160,25 @@ export function SettingsScreen({
   approvalMode,
   showToolCalls = true,
   appearancePreference = 'system',
+  darkUiPalette = 'classic',
   fontPreference = DEFAULT_FONT_PREFERENCE,
   onDefaultChatEngineChange,
   onDefaultModelSettingsChange,
   onApprovalModeChange,
   onShowToolCallsChange,
+  workspaceChatLimit = DEFAULT_WORKSPACE_CHAT_LIMIT,
+  onWorkspaceChatLimitChange,
   onAppearancePreferenceChange,
+  onDarkUiPaletteChange,
   onFontPreferenceChange,
   onEditBridgeProfile,
   onAddBridgeProfile,
   onSwitchBridgeProfile,
+  onRenameBridgeProfile,
+  onDeleteBridgeProfile,
   onClearSavedBridges,
   onOpenDrawer,
   onDrawerGestureEnabledChange,
-  onOpenBrowser,
   onOpenPrivacy,
   onOpenTerms,
 }: SettingsScreenProps) {
@@ -163,11 +186,27 @@ export function SettingsScreen({
   const { colors } = theme;
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const transcriptSwitchTrackColor = theme.isDark ? colors.borderLight : 'rgba(95, 105, 118, 0.32)';
-  const transcriptSwitchActiveColor = theme.isDark ? colors.accent : '#4F5D6D';
-  const transcriptSwitchThumbColor = showToolCalls ? colors.white : '#FFFFFF';
+  const appVersion = readOptionalDisplayString(Constants.expoConfig?.version) ?? 'Unknown';
+  const nativeBuildVersion =
+    Platform.OS === 'ios'
+      ? readOptionalDisplayString(Constants.platform?.ios?.buildNumber)
+      : Platform.OS === 'android'
+        ? readOptionalDisplayString(Constants.platform?.android?.versionCode)
+        : null;
+  const configuredBuildVersion =
+    Platform.OS === 'ios'
+      ? readOptionalDisplayString(Constants.expoConfig?.ios?.buildNumber)
+      : Platform.OS === 'android'
+        ? readOptionalDisplayString(Constants.expoConfig?.android?.versionCode)
+        : null;
+  const appBuildVersion =
+    nativeBuildVersion ??
+    configuredBuildVersion ??
+    (Platform.OS === 'web' ? 'Web runtime' : 'Unavailable');
+  const transcriptSwitchTrackColor = colors.borderLight;
+  const transcriptSwitchActiveColor = colors.accent;
+  const transcriptSwitchThumbColor = colors.white;
   const [healthyAt, setHealthyAt] = useState<string | null>(null);
-  const [uptimeSec, setUptimeSec] = useState<number | null>(null);
   const [wsConnected, setWsConnected] = useState(ws.isConnected);
   const [error, setError] = useState<string | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
@@ -176,19 +215,29 @@ export function SettingsScreen({
   const [modelModalVisible, setModelModalVisible] = useState(false);
   const [effortModalVisible, setEffortModalVisible] = useState(false);
   const [approvalModeModalVisible, setApprovalModeModalVisible] = useState(false);
+  const [workspaceChatLimitModalVisible, setWorkspaceChatLimitModalVisible] = useState(false);
   const [appearanceModalVisible, setAppearanceModalVisible] = useState(false);
+  const [darkPaletteModalVisible, setDarkPaletteModalVisible] = useState(false);
   const [fontModalVisible, setFontModalVisible] = useState(false);
   const [bridgeProfileModalVisible, setBridgeProfileModalVisible] = useState(false);
+  const [showConnectionTroubleshooting, setShowConnectionTroubleshooting] = useState(false);
   const [account, setAccount] = useState<AccountSnapshot | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [accountRateLimits, setAccountRateLimits] = useState<AccountRateLimitSnapshot | null>(null);
+  const [accountRateLimits, setAccountRateLimits] = useState<AccountRateLimitSnapshot | null>(
+    () => api.peekAccountRateLimits()
+  );
   const [rateLimitsLoading, setRateLimitsLoading] = useState(false);
   const [rateLimitsError, setRateLimitsError] = useState<string | null>(null);
   const [bridgeCapabilities, setBridgeCapabilities] = useState<BridgeCapabilities | null>(null);
   const [bridgeRuntime, setBridgeRuntime] = useState<BridgeRuntimeInfo | null>(null);
   const [bridgeRuntimeLoading, setBridgeRuntimeLoading] = useState(false);
   const [bridgeRuntimeError, setBridgeRuntimeError] = useState<string | null>(null);
+  const [cursorCredentials, setCursorCredentials] =
+    useState<CursorCredentialStatus | null>(null);
+  const [cursorCredentialsLoading, setCursorCredentialsLoading] = useState(false);
+  const [cursorCredentialsError, setCursorCredentialsError] = useState<string | null>(null);
+  const [engineActionMessage, setEngineActionMessage] = useState<string | null>(null);
   const [bridgeRestartModalVisible, setBridgeRestartModalVisible] = useState(false);
   const [bridgeRestartActionError, setBridgeRestartActionError] = useState<string | null>(null);
   const [bridgeRestartStarting, setBridgeRestartStarting] = useState(false);
@@ -217,14 +266,21 @@ export function SettingsScreen({
     setRoute(nextRoute);
   }, []);
 
-  const availableEngines: ChatEngine[] = bridgeCapabilities?.availableEngines?.length
-    ? bridgeCapabilities.availableEngines
-    : defaultChatEngine
-      ? [defaultChatEngine]
-      : ['codex'];
-  const normalizedDefaultChatEngine = availableEngines.includes(defaultChatEngine ?? 'codex')
-    ? (defaultChatEngine ?? 'codex')
-    : availableEngines[0] ?? 'codex';
+  const runtimeAvailableEngines = bridgeCapabilities?.availableEngines ?? [];
+  const availableEngines = useMemo(
+    () =>
+      mergeChatEngines(
+        runtimeAvailableEngines,
+        bridgeCapabilities?.activeEngine
+      ),
+    [bridgeCapabilities?.activeEngine, runtimeAvailableEngines]
+  );
+  const normalizedDefaultChatEngine =
+    defaultChatEngine && availableEngines.includes(defaultChatEngine)
+      ? defaultChatEngine
+      : bridgeCapabilities?.activeEngine && availableEngines.includes(bridgeCapabilities.activeEngine)
+        ? bridgeCapabilities.activeEngine
+        : availableEngines[0] ?? 'codex';
   const selectedEngineDefaults = defaultEngineSettings?.[normalizedDefaultChatEngine] ?? null;
   const normalizedDefaultModelId = normalizeModelId(selectedEngineDefaults?.modelId);
   const normalizedDefaultEffort = normalizeReasoningEffort(selectedEngineDefaults?.effort);
@@ -256,10 +312,14 @@ export function SettingsScreen({
       ? appearancePreference
       : 'system';
   const normalizedFontPreference = normalizeFontPreference(fontPreference);
+  const normalizedDarkUiPalette = darkUiPalette === 'grey' ? 'grey' : 'classic';
+  const darkUiPaletteLabel =
+    normalizedDarkUiPalette === 'grey' ? 'Grey (IDE-style)' : 'Classic (pure black)';
   const approvalModeLabel =
     normalizedApprovalMode === 'yolo'
       ? 'YOLO (no approval prompts)'
       : 'Normal (ask for approvals)';
+  const workspaceChatLimitLabel = formatWorkspaceChatLimit(workspaceChatLimit);
   const appearancePreferenceLabel =
     normalizedAppearancePreference === 'light'
       ? 'Light'
@@ -272,7 +332,10 @@ export function SettingsScreen({
     () => buildComposerUsageLimitBadges(accountRateLimits),
     [accountRateLimits]
   );
-  const showCodexUsageLimits = availableEngines.includes('codex');
+  const showCodexUsageLimits =
+    runtimeAvailableEngines.length > 0
+      ? runtimeAvailableEngines.includes('codex')
+      : availableEngines.includes('codex');
   const canSelfUpdateBridge =
     bridgeCapabilities?.supports.selfUpdate === true &&
     bridgeRuntime?.selfUpdateSupported === true;
@@ -283,22 +346,57 @@ export function SettingsScreen({
     ? isBridgeMaintenanceInProgress(bridgeUpdateStatus.state)
     : false;
   const bridgeLatestVersion = bridgeRuntime?.latestVersion?.trim() || null;
+  const activeBridgeProfile = useMemo(
+    () =>
+      bridgeProfiles.find((profile) => profile.id === activeBridgeProfileId) ??
+      bridgeProfiles[0] ??
+      null,
+    [activeBridgeProfileId, bridgeProfiles]
+  );
+  const activeConnectionType = activeBridgeProfile ? 'Private bridge' : 'Connection';
+  const shouldOpenPrivateBridgeEditor = Boolean(
+    activeBridgeProfile && onEditBridgeProfile
+  );
+  const connectionStatusSummary = wsConnected
+    ? 'Connected'
+    : healthyAt
+      ? 'Reachable'
+      : 'Unknown';
+  const serverToolsStatus = bridgeUpdateStatus
+    ? formatBridgeUpdaterState(bridgeUpdateStatus.state)
+    : bridgeMaintenanceBusy || bridgeMaintenanceActive
+      ? 'Busy'
+      : canSelfUpdateBridge || canSafeRestartBridge
+        ? 'Ready'
+        : 'Limited';
+  const engineSummary =
+    activeEngine && runtimeAvailableEngines.includes(activeEngine)
+      ? runtimeAvailableEngines.length > 1
+        ? `${getChatEngineLabel(activeEngine)} active · ${runtimeAvailableEngines.length} available`
+        : getChatEngineLabel(activeEngine)
+      : runtimeAvailableEngines.length > 1
+        ? `${runtimeAvailableEngines.length} available`
+        : runtimeAvailableEngines.length === 1
+          ? getChatEngineLabel(runtimeAvailableEngines[0]!)
+          : 'Server managed';
   const headerTitle =
     route === 'chat'
       ? 'Chat Preferences'
       : route === 'account'
-        ? 'Account & Auth'
+        ? 'Account'
         : route === 'limits'
           ? 'Codex Usage Limits'
           : route === 'bridge'
-          ? 'Bridge & Servers'
-          : route === 'appearance'
-            ? 'Appearance'
-            : route === 'tips'
-              ? 'Support Clawdex'
-              : route === 'legal'
-                ? 'Legal'
-                : 'Settings';
+            ? 'Connections'
+            : route === 'engines'
+              ? 'Engines'
+              : route === 'appearance'
+                ? 'Appearance'
+                : route === 'tips'
+                  ? 'Support Clawdex'
+                  : route === 'legal'
+                    ? 'Legal'
+                    : 'Settings';
   const headerIcon =
     route === 'chat'
       ? ('sparkles-outline' as const)
@@ -307,21 +405,28 @@ export function SettingsScreen({
         : route === 'limits'
           ? ('speedometer-outline' as const)
           : route === 'bridge'
-          ? ('server-outline' as const)
-          : route === 'appearance'
-            ? ('color-palette-outline' as const)
-            : route === 'tips'
-              ? ('heart-outline' as const)
-              : route === 'legal'
-                ? ('document-text-outline' as const)
-                : ('settings' as const);
+            ? ('link-outline' as const)
+            : route === 'engines'
+              ? ('hardware-chip-outline' as const)
+              : route === 'appearance'
+                ? ('color-palette-outline' as const)
+                : route === 'tips'
+                  ? ('heart-outline' as const)
+                  : route === 'legal'
+                    ? ('document-text-outline' as const)
+                    : ('settings' as const);
   const chatDefaultsSummary = normalizedDefaultModelId
     ? `${defaultEngineLabel} · ${defaultModelLabel} · ${defaultEffortLabel}`
     : `${defaultEngineLabel} · Server default`;
-  const appearanceSummary = `${appearancePreferenceLabel} theme · ${fontPreferenceLabel}`;
-  const accountSummary = 'View account type, email, and bridge auth details';
+  const appearanceSummary = `${appearancePreferenceLabel} · ${darkUiPaletteLabel} · ${fontPreferenceLabel}`;
+  const accountSummary = 'See sign-in status and plan';
   const usageLimitsSummary = 'View weekly usage and reset times';
-  const bridgeSummary = 'Manage profiles, maintenance, engines, and health';
+  const bridgeSummary = 'Add or manage private connections';
+  const enginesSummary = formatEnginesSummary(
+    runtimeAvailableEngines,
+    cursorCredentials,
+    cursorCredentialsLoading
+  );
   const tipJarSummary = isTipJarAvailable()
     ? 'Support development with a one-time tip'
     : 'Configure RevenueCat to enable tips';
@@ -335,6 +440,7 @@ export function SettingsScreen({
   const shouldLoadAccountSettings = route === 'account';
   const shouldLoadLimitsSettings = route === 'limits';
   const shouldLoadBridgeSettings = route === 'bridge';
+  const shouldLoadEngineSettings = route === 'engines';
 
   useEffect(() => {
     onDrawerGestureEnabledChange?.(route === 'home');
@@ -376,7 +482,6 @@ export function SettingsScreen({
     try {
       const h = await api.health();
       setHealthyAt(h.at);
-      setUptimeSec(h.uptimeSec);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -404,6 +509,19 @@ export function SettingsScreen({
       setBridgeRuntimeError((err as Error).message);
     } finally {
       setBridgeRuntimeLoading(false);
+    }
+  }, [api]);
+
+  const loadCursorCredentials = useCallback(async () => {
+    setCursorCredentialsLoading(true);
+    try {
+      const status = await api.readCursorCredentials();
+      setCursorCredentials(status);
+      setCursorCredentialsError(null);
+    } catch (err) {
+      setCursorCredentialsError((err as Error).message);
+    } finally {
+      setCursorCredentialsLoading(false);
     }
   }, [api]);
 
@@ -435,15 +553,29 @@ export function SettingsScreen({
     }
   }, [api]);
 
-  const loadRateLimits = useCallback(async () => {
-    setRateLimitsLoading(true);
+  const loadRateLimits = useCallback(async (options?: { showLoading?: boolean }) => {
+    const cachedSnapshot = api.peekAccountRateLimits();
+    if (cachedSnapshot) {
+      setAccountRateLimits(cachedSnapshot);
+    }
+
+    const showLoading = options?.showLoading !== false && !cachedSnapshot;
+    setRateLimitsLoading(showLoading);
     try {
-      const snapshot = await api.readAccountRateLimits();
+      const snapshot = await api.readAccountRateLimits({ forceRefresh: true });
       setAccountRateLimits(snapshot);
       setRateLimitsError(null);
     } catch (err) {
-      setRateLimitsError((err as Error).message);
+      setRateLimitsError(formatRateLimitsError(err));
     } finally {
+      setRateLimitsLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    const cachedSnapshot = api.peekAccountRateLimits();
+    if (cachedSnapshot) {
+      setAccountRateLimits(cachedSnapshot);
       setRateLimitsLoading(false);
     }
   }, [api]);
@@ -479,6 +611,10 @@ export function SettingsScreen({
         void loadBridgeCapabilities();
         void loadBridgeRuntime();
       }
+      if (shouldLoadEngineSettings) {
+        void loadBridgeCapabilities();
+        void loadCursorCredentials();
+      }
       if (shouldLoadChatSettings) {
         void loadBridgeCapabilities();
         void refreshModelOptions();
@@ -496,11 +632,13 @@ export function SettingsScreen({
     loadAccount,
     loadBridgeCapabilities,
     loadBridgeRuntime,
+    loadCursorCredentials,
     loadRateLimits,
     refreshModelOptions,
     shouldLoadAccountSettings,
     shouldLoadBridgeSettings,
     shouldLoadChatSettings,
+    shouldLoadEngineSettings,
     shouldLoadLimitsSettings,
   ]);
 
@@ -513,6 +651,10 @@ export function SettingsScreen({
             void checkHealth();
             void loadBridgeCapabilities();
             void loadBridgeRuntime();
+          }
+          if (shouldLoadEngineSettings) {
+            void loadBridgeCapabilities();
+            void loadCursorCredentials();
           }
           if (shouldLoadChatSettings) {
             void loadBridgeCapabilities();
@@ -531,11 +673,13 @@ export function SettingsScreen({
       loadAccount,
       loadBridgeCapabilities,
       loadBridgeRuntime,
+      loadCursorCredentials,
       loadRateLimits,
       refreshModelOptions,
       shouldLoadAccountSettings,
       shouldLoadBridgeSettings,
       shouldLoadChatSettings,
+      shouldLoadEngineSettings,
       shouldLoadLimitsSettings,
       ws,
     ]
@@ -545,14 +689,41 @@ export function SettingsScreen({
     () =>
       ws.onEvent((event) => {
         if (event.method === 'account/rateLimits/updated' && shouldLoadLimitsSettings) {
-          void loadRateLimits();
+          const params = toRecord(event.params);
+          const snapshot = readAccountRateLimitSnapshot(
+            params?.rateLimits ?? params?.rate_limits ?? event.params
+          );
+          api.rememberAccountRateLimits(snapshot);
+          setAccountRateLimits(snapshot);
+          setRateLimitsError(null);
+          setRateLimitsLoading(false);
+          if (!snapshot) {
+            void loadRateLimits({ showLoading: false });
+          }
         }
 
         if (event.method === 'account/updated' && shouldLoadAccountSettings) {
           void loadAccount();
         }
+
+        if (event.method === 'bridge/capabilities/changed') {
+          void loadBridgeCapabilities();
+          if (shouldLoadEngineSettings) {
+            void loadCursorCredentials();
+          }
+        }
       }),
-    [loadAccount, loadRateLimits, shouldLoadAccountSettings, shouldLoadLimitsSettings, ws]
+    [
+      api,
+      loadAccount,
+      loadBridgeCapabilities,
+      loadCursorCredentials,
+      loadRateLimits,
+      shouldLoadAccountSettings,
+      shouldLoadEngineSettings,
+      shouldLoadLimitsSettings,
+      ws,
+    ]
   );
 
   useEffect(() => {
@@ -798,6 +969,25 @@ export function SettingsScreen({
     [normalizedApprovalMode, selectApprovalMode]
   );
 
+  const workspaceChatLimitOptions = useMemo<SelectionSheetOption[]>(
+    () =>
+      WORKSPACE_CHAT_LIMIT_OPTIONS.map((option) => ({
+        key: option === null ? 'all' : String(option),
+        title: formatWorkspaceChatLimit(option),
+        description:
+          option === null
+            ? 'Show every chat in each workspace section.'
+            : `Show ${option} chats first, with a Show all button for the rest.`,
+        icon: option === null ? ('albums-outline' as const) : ('list-outline' as const),
+        selected: workspaceChatLimit === option,
+        onPress: () => {
+          onWorkspaceChatLimitChange?.(option);
+          setWorkspaceChatLimitModalVisible(false);
+        },
+      })),
+    [onWorkspaceChatLimitChange, workspaceChatLimit]
+  );
+
   const appearanceOptions = useMemo<SelectionSheetOption[]>(
     () => [
       {
@@ -837,6 +1027,34 @@ export function SettingsScreen({
     [normalizedAppearancePreference, onAppearancePreferenceChange]
   );
 
+  const darkPaletteOptions = useMemo<SelectionSheetOption[]>(
+    () => [
+      {
+        key: 'classic',
+        title: 'Classic',
+        description: 'Deep black and blue-gray tones. Often nicest on OLED battery-wise.',
+        icon: 'contrast-outline',
+        selected: normalizedDarkUiPalette === 'classic',
+        onPress: () => {
+          onDarkUiPaletteChange?.('classic');
+          setDarkPaletteModalVisible(false);
+        },
+      },
+      {
+        key: 'grey',
+        title: 'Grey',
+        description: 'Lifted charcoal neutrals inspired by IDE dark themes.',
+        icon: 'layers-outline',
+        selected: normalizedDarkUiPalette === 'grey',
+        onPress: () => {
+          onDarkUiPaletteChange?.('grey');
+          setDarkPaletteModalVisible(false);
+        },
+      },
+    ],
+    [normalizedDarkUiPalette, onDarkUiPaletteChange]
+  );
+
   const fontOptions = useMemo<SelectionSheetOption[]>(
     () =>
       FONT_PREFERENCE_OPTIONS.map((option) => {
@@ -866,23 +1084,6 @@ export function SettingsScreen({
         };
       }),
     [normalizedFontPreference, onFontPreferenceChange]
-  );
-
-  const bridgeProfileOptions = useMemo<SelectionSheetOption[]>(
-    () =>
-      bridgeProfiles.map((profile) => ({
-        key: profile.id,
-        title: profile.name,
-        description: profile.bridgeUrl,
-        icon: 'server-outline' as const,
-        badge: profile.id === activeBridgeProfileId ? 'Active' : undefined,
-        selected: profile.id === activeBridgeProfileId,
-        onPress: () => {
-          setBridgeProfileModalVisible(false);
-          void onSwitchBridgeProfile?.(profile.id);
-        },
-      })),
-    [activeBridgeProfileId, bridgeProfiles, onSwitchBridgeProfile]
   );
 
   const startBridgeRestart = useCallback(async () => {
@@ -979,6 +1180,17 @@ export function SettingsScreen({
     [bridgeLatestVersion, bridgeMaintenanceActive, bridgeMaintenanceBusy, bridgeUpdateStarting, startBridgeUpdate]
   );
 
+  const handleConnectEngine = useCallback(
+    (engine: Exclude<ChatEngine, 'codex'>) => {
+      const command =
+        engine === 'cursor'
+          ? 'clawdex init --engines codex,cursor'
+          : 'clawdex init --engines codex,opencode';
+      setEngineActionMessage(`Run ${command} on the bridge host, then restart the connection.`);
+    },
+    []
+  );
+
   const enginePickerOptions = useMemo<SelectionSheetOption[]>(
     () =>
       availableEngines.map((engine) => ({
@@ -987,8 +1199,15 @@ export function SettingsScreen({
         description:
           engine === 'opencode'
             ? 'Use OpenCode defaults for new chats.'
-            : 'Use Codex defaults for new chats.',
-        icon: engine === 'opencode' ? ('layers-outline' as const) : ('sparkles-outline' as const),
+            : engine === 'cursor'
+              ? 'Use Cursor SDK defaults for new chats.'
+              : 'Use Codex defaults for new chats.',
+        icon:
+          engine === 'opencode'
+            ? ('layers-outline' as const)
+            : engine === 'cursor'
+              ? ('code-slash-outline' as const)
+              : ('sparkles-outline' as const),
         selected: engine === normalizedDefaultChatEngine,
         onPress: () => selectDefaultEngine(engine),
       })),
@@ -1086,23 +1305,21 @@ export function SettingsScreen({
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
         <MenuEntry
           icon="person-circle-outline"
-          title="Account & Auth"
+          title="Account"
           description={accountSummary}
           onPress={() => navigateToRoute('account')}
         />
         <MenuEntry
-          icon="server-outline"
-          title="Bridge & Servers"
-          description={bridgeSummary}
-          onPress={() => navigateToRoute('bridge')}
+          icon="hardware-chip-outline"
+          title="Engines"
+          description={enginesSummary}
+          onPress={() => navigateToRoute('engines')}
         />
         <MenuEntry
-          icon="globe-outline"
-          title="Local Preview Browser"
-          description="Open localhost web apps from the bridge machine inside Clawdex"
-          onPress={() => {
-            onOpenBrowser?.();
-          }}
+          icon="server-outline"
+          title="Connections"
+          description={bridgeSummary}
+          onPress={() => navigateToRoute('bridge')}
           isLast
         />
       </BlurView>
@@ -1130,6 +1347,12 @@ export function SettingsScreen({
           onPress={() => navigateToRoute('legal')}
           isLast
         />
+      </BlurView>
+
+      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>App</Text>
+      <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
+        <Row label="Version" value={appVersion} />
+        <Row label="Build" value={appBuildVersion} isLast />
       </BlurView>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -1237,6 +1460,26 @@ export function SettingsScreen({
         start jumping while a turn is running.
       </Text>
 
+      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Sidebar</Text>
+      <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
+        <Pressable
+          onPress={() => setWorkspaceChatLimitModalVisible(true)}
+          style={({ pressed }) => [
+            styles.settingRow,
+            styles.settingRowLast,
+            pressed && styles.linkRowPressed,
+          ]}
+        >
+          <View style={styles.settingRowLeft}>
+            <Text style={styles.rowLabel}>Chats per workspace</Text>
+            <Text style={styles.settingValue} numberOfLines={2}>
+              {workspaceChatLimitLabel}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </Pressable>
+      </BlurView>
+
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </>
   );
@@ -1249,14 +1492,28 @@ export function SettingsScreen({
           onPress={() => setAppearanceModalVisible(true)}
           style={({ pressed }) => [
             styles.settingRow,
-            styles.settingRowLast,
             pressed && styles.linkRowPressed,
           ]}
         >
           <View style={styles.settingRowLeft}>
-            <Text style={styles.rowLabel}>Theme</Text>
+            <Text style={styles.rowLabel}>Light / Dark</Text>
             <Text style={styles.settingValue} numberOfLines={2}>
               {appearancePreferenceLabel}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </Pressable>
+        <Pressable
+          onPress={() => setDarkPaletteModalVisible(true)}
+          style={({ pressed }) => [
+            styles.settingRow,
+            pressed && styles.linkRowPressed,
+          ]}
+        >
+          <View style={styles.settingRowLeft}>
+            <Text style={styles.rowLabel}>Dark palette</Text>
+            <Text style={styles.settingValue} numberOfLines={2}>
+              {darkUiPaletteLabel}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
@@ -1279,14 +1536,15 @@ export function SettingsScreen({
         </Pressable>
       </BlurView>
       <Text style={styles.subtleHintText}>
-        System follows your phone appearance. Existing installs stay dark until changed.
+        Light / Dark follows System when chosen. Dark palette applies whenever the interface is in
+        dark mode (including System when your phone is set to dark).
       </Text>
     </>
   );
 
   const renderAccountContent = () => (
     <>
-      <Text style={styles.sectionLabel}>Account & Auth</Text>
+      <Text style={styles.sectionLabel}>Account</Text>
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
         {accountLoading ? (
           <View style={styles.accountLoadingState}>
@@ -1296,25 +1554,17 @@ export function SettingsScreen({
         ) : (
           <>
             <Row
-              label="Status"
-              value={formatAccountType(account)}
+              label="Sign-in"
+              value={formatAccountSignInStatus(account)}
               valueColor={account?.type ? colors.statusComplete : colors.textMuted}
+              isLast={!account?.email && !account?.planType}
             />
             {account?.email ? <Row label="Email" value={account.email} /> : null}
-            {account?.planType ? <Row label="Plan" value={formatPlanType(account.planType)} /> : null}
-            <Row
-              label="Bridge auth"
-              value={account?.requiresOpenaiAuth ? 'Required' : 'Optional'}
-              isLast
-            />
+            {account?.planType ? <Row label="Plan" value={formatPlanType(account.planType)} isLast /> : null}
           </>
         )}
       </BlurView>
-      {account?.type === null && account?.requiresOpenaiAuth ? (
-        <Text style={styles.subtleHintText}>
-          The bridge expects OpenAI auth, but mobile does not expose a login flow yet.
-        </Text>
-      ) : null}
+      <Text style={styles.subtleHintText}>{formatAccountHelpText(account)}</Text>
       {accountError ? <Text style={styles.errorText}>{accountError}</Text> : null}
     </>
   );
@@ -1369,182 +1619,270 @@ export function SettingsScreen({
 
   const renderBridgeContent = () => (
     <>
-      <Text style={styles.sectionLabel}>Bridge Profiles</Text>
+      <Text style={styles.sectionLabel}>Connections</Text>
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
-        <Row label="Active profile" value={bridgeProfileName} />
-        <Row label="Saved profiles" value={String(bridgeProfiles.length)} />
-        <Row label="Storage" value="Secure device keychain" isLast />
-        <Text selectable style={styles.valueText}>
-          {bridgeUrl}
-        </Text>
-        <Pressable
+        <Row label="Current connection" value={bridgeProfileName} />
+        <Row label="Type" value={activeConnectionType} />
+        <Row label="Saved connections" value={String(bridgeProfiles.length)} isLast />
+        {(onAddBridgeProfile || shouldOpenPrivateBridgeEditor) ? (
+          <MenuEntry
+            icon="hardware-chip-outline"
+            logo="clawdex"
+            title="Private bridge"
+            description={
+              shouldOpenPrivateBridgeEditor
+                ? 'Update the private connection on this device.'
+                : 'Connect to your own machine.'
+            }
+            onPress={
+              shouldOpenPrivateBridgeEditor
+                ? onEditBridgeProfile!
+                : onAddBridgeProfile!
+            }
+          />
+        ) : null}
+        <MenuEntry
+          icon="albums-outline"
+          title="Manage saved connections"
+          description="Switch, rename, or remove saved connections."
           onPress={() => setBridgeProfileModalVisible(true)}
-          style={({ pressed }) => [styles.bridgeEditBtn, pressed && styles.bridgeEditBtnPressed]}
-        >
-          <Ionicons name="swap-horizontal-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.bridgeEditBtnText}>Switch profile</Text>
-        </Pressable>
-        <Pressable
-          onPress={onAddBridgeProfile}
-          style={({ pressed }) => [styles.bridgeEditBtn, pressed && styles.bridgeEditBtnPressed]}
-        >
-          <Ionicons name="add-circle-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.bridgeEditBtnText}>Add profile</Text>
-        </Pressable>
-        <Pressable
-          onPress={onEditBridgeProfile}
-          style={({ pressed }) => [styles.bridgeEditBtn, pressed && styles.bridgeEditBtnPressed]}
-        >
-          <Ionicons name="create-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.bridgeEditBtnText}>Edit active profile</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            void onClearSavedBridges?.();
-          }}
-          style={({ pressed }) => [styles.bridgeResetBtn, pressed && styles.bridgeResetBtnPressed]}
-        >
-          <Ionicons name="refresh-circle-outline" size={15} color={colors.error} />
-          <Text style={styles.bridgeResetBtnText}>Clear saved bridges</Text>
-        </Pressable>
+          isLast
+        />
       </BlurView>
       <Text style={styles.subtleHintText}>
-        Bridge URLs and tokens are stored in the secure device keychain so you can switch
-        servers without retyping secrets.
+        Saved connections stay in secure device storage so you can switch later without
+        re-entering everything.
       </Text>
 
-      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Bridge Maintenance</Text>
+      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Troubleshooting</Text>
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
-        {bridgeRuntimeLoading ? (
-          <View style={styles.accountLoadingState}>
-            <ActivityIndicator color={colors.textPrimary} />
-            <Text style={styles.settingValue}>Loading bridge runtime…</Text>
+        <Pressable
+          onPress={() => setShowConnectionTroubleshooting((current) => !current)}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+        >
+          <View style={styles.linkRowLeft}>
+            <Ionicons name="construct-outline" size={16} color={colors.textPrimary} />
+            <Text style={styles.linkRowLabel}>Connection tools</Text>
           </View>
-        ) : (
+          <Ionicons
+            name={showConnectionTroubleshooting ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={colors.textMuted}
+          />
+        </Pressable>
+
+        {showConnectionTroubleshooting ? (
           <>
-            <Row label="Bridge version" value={bridgeRuntime?.version ?? 'Unknown'} />
-            <Row label="Latest available" value={bridgeLatestVersion ?? 'Unknown'} />
+            {onClearSavedBridges ? (
+              <Pressable
+                onPress={() => {
+                  void onClearSavedBridges();
+                }}
+                style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+              >
+                <View style={styles.linkRowLeft}>
+                  <Ionicons name="refresh-circle-outline" size={15} color={colors.error} />
+                  <Text style={[styles.linkRowLabel, { color: colors.error }]}>
+                    Clear all saved connections
+                  </Text>
+                </View>
+              </Pressable>
+            ) : null}
+
+            {bridgeRuntimeLoading ? (
+              <View style={styles.accountLoadingState}>
+                <ActivityIndicator color={colors.textPrimary} />
+                <Text style={styles.settingValue}>Loading connection tools…</Text>
+              </View>
+            ) : (
+              <>
+                <Row label="Service version" value={bridgeRuntime?.version ?? 'Unknown'} />
+                <Row label="Status" value={serverToolsStatus} />
+              </>
+            )}
+            <Row label="Connection status" value={connectionStatusSummary} />
+            <Row label="Chat engines" value={engineSummary} />
             <Row
               label="Install type"
               value={formatInstallKind(bridgeRuntime?.installKind ?? 'unknown')}
+              isLast
             />
-            {bridgeUpdateStatus ? (
-              <Row
-                label="Last maintenance state"
-                value={formatBridgeUpdaterState(bridgeUpdateStatus.state)}
-              />
-            ) : null}
-            {bridgeUpdateStatus ? (
-              <Row
-                label="Maintenance message"
-                value={bridgeUpdateStatus.message}
-                isLast
-              />
-            ) : null}
-            {!bridgeUpdateStatus ? (
-              <Row
-                label="Maintenance status"
-                value={canSelfUpdateBridge || canSafeRestartBridge ? 'Ready' : 'Unavailable'}
-                isLast
-              />
-            ) : null}
+
+            <Pressable
+              disabled={!canSafeRestartBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive}
+              onPress={() => setBridgeRestartModalVisible(true)}
+              style={({ pressed }) => [
+                styles.bridgeEditBtn,
+                (!canSafeRestartBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive) &&
+                  styles.settingRowDisabled,
+                pressed &&
+                  canSafeRestartBridge &&
+                  !bridgeMaintenanceBusy &&
+                  !bridgeMaintenanceActive &&
+                  styles.bridgeEditBtnPressed,
+              ]}
+            >
+              <Ionicons name="refresh-outline" size={15} color={colors.textPrimary} />
+              <Text style={styles.bridgeEditBtnText}>
+                {bridgeRestartStarting ? 'Scheduling restart…' : 'Restart service'}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={!canSelfUpdateBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive}
+              onPress={() => setBridgeUpdateModalVisible(true)}
+              style={({ pressed }) => [
+                styles.bridgeEditBtn,
+                (!canSelfUpdateBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive) &&
+                  styles.settingRowDisabled,
+                pressed &&
+                  canSelfUpdateBridge &&
+                  !bridgeMaintenanceBusy &&
+                  !bridgeMaintenanceActive &&
+                  styles.bridgeEditBtnPressed,
+              ]}
+            >
+              <Ionicons name="cloud-download-outline" size={15} color={colors.textPrimary} />
+              <Text style={styles.bridgeEditBtnText}>
+                {bridgeUpdateStarting ? 'Starting update…' : 'Update service'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                void checkHealth();
+                void loadBridgeCapabilities();
+                void loadBridgeRuntime();
+                void refreshModelOptions();
+                void loadAccount();
+                void loadRateLimits();
+              }}
+              style={({ pressed }) => [styles.refreshBtn, pressed && styles.refreshBtnPressed]}
+            >
+              <Ionicons name="refresh" size={16} color={colors.white} />
+              <Text style={styles.refreshBtnText}>Refresh connection details</Text>
+            </Pressable>
           </>
-        )}
-        <Pressable
-          disabled={!canSafeRestartBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive}
-          onPress={() => setBridgeRestartModalVisible(true)}
-          style={({ pressed }) => [
-            styles.bridgeEditBtn,
-            (!canSafeRestartBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive) &&
-              styles.settingRowDisabled,
-            pressed &&
-              canSafeRestartBridge &&
-              !bridgeMaintenanceBusy &&
-              !bridgeMaintenanceActive &&
-              styles.bridgeEditBtnPressed,
-          ]}
-        >
-          <Ionicons name="refresh-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.bridgeEditBtnText}>
-            {bridgeRestartStarting ? 'Scheduling bridge restart…' : 'Restart bridge safely'}
-          </Text>
-        </Pressable>
-        <Pressable
-          disabled={!canSelfUpdateBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive}
-          onPress={() => setBridgeUpdateModalVisible(true)}
-          style={({ pressed }) => [
-            styles.bridgeEditBtn,
-            (!canSelfUpdateBridge || bridgeMaintenanceBusy || bridgeMaintenanceActive) &&
-              styles.settingRowDisabled,
-            pressed &&
-              canSelfUpdateBridge &&
-              !bridgeMaintenanceBusy &&
-              !bridgeMaintenanceActive &&
-              styles.bridgeEditBtnPressed,
-          ]}
-        >
-          <Ionicons name="cloud-download-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.bridgeEditBtnText}>
-            {bridgeUpdateStarting ? 'Starting bridge update…' : 'Update bridge'}
-          </Text>
-        </Pressable>
+        ) : null}
       </BlurView>
+      <Text style={styles.subtleHintText}>
+        Use these only when you are fixing a connection problem.
+      </Text>
       {bridgeRestartActionError ? <Text style={styles.errorText}>{bridgeRestartActionError}</Text> : null}
       {bridgeUpdateActionError ? <Text style={styles.errorText}>{bridgeUpdateActionError}</Text> : null}
       {bridgeRuntimeError ? <Text style={styles.errorText}>{bridgeRuntimeError}</Text> : null}
-
-      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Engines</Text>
-      <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
-        <EngineAvailabilityRow
-          engine="codex"
-          available={availableEngines.includes('codex')}
-          active={activeEngine === 'codex'}
-        />
-        <EngineAvailabilityRow
-          engine="opencode"
-          available={availableEngines.includes('opencode')}
-          active={activeEngine === 'opencode'}
-          isLast
-        />
-      </BlurView>
-      <Text style={styles.subtleHintText}>
-        The new chat engine picker only appears when multiple engines are available on
-        this bridge.
-      </Text>
-
-      <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Health</Text>
-      <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
-        <Row
-          label="Status"
-          value={healthyAt ? 'OK' : 'Unknown'}
-          valueColor={healthyAt ? colors.statusComplete : colors.textMuted}
-        />
-        <Row label="Last seen" value={healthyAt ?? '—'} />
-        <Row label="Uptime" value={uptimeSec !== null ? `${uptimeSec}s` : '—'} />
-        <Row
-          label="WebSocket"
-          value={wsConnected ? 'Connected' : 'Disconnected'}
-          valueColor={wsConnected ? colors.statusComplete : colors.statusError}
-          isLast
-        />
-      </BlurView>
-
-      <Pressable
-        onPress={() => {
-          void checkHealth();
-          void loadBridgeCapabilities();
-          void loadBridgeRuntime();
-          void refreshModelOptions();
-          void loadAccount();
-          void loadRateLimits();
-        }}
-        style={({ pressed }) => [styles.refreshBtn, pressed && styles.refreshBtnPressed]}
-      >
-        <Ionicons name="refresh" size={16} color={colors.white} />
-        <Text style={styles.refreshBtnText}>Refresh settings</Text>
-      </Pressable>
     </>
   );
+
+  const renderEnginesContent = () => {
+    const statusColor =
+      cursorCredentials?.valid === true
+        ? colors.statusComplete
+        : cursorCredentials?.configured
+          ? colors.error
+          : colors.textMuted;
+    const codexConnected =
+      runtimeAvailableEngines.length === 0 || runtimeAvailableEngines.includes('codex');
+    const cursorConnected =
+      cursorCredentials?.valid === true &&
+      (cursorCredentials.runtimeAvailable || runtimeAvailableEngines.includes('cursor'));
+    const cursorActionLabel = cursorConnected ? undefined : 'Connect';
+    const opencodeConnected = runtimeAvailableEngines.includes('opencode');
+    const opencodeActionLabel = opencodeConnected ? undefined : 'Connect';
+    return (
+      <>
+        <Text style={styles.sectionLabel}>Engines</Text>
+        <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
+          <EngineConnectionEntry
+            icon="sparkles-outline"
+            title="Codex"
+            description="Already available on this connection."
+            status={codexConnected ? 'Connected' : 'Unavailable'}
+            statusTone={codexConnected ? 'connected' : 'muted'}
+          />
+          <EngineConnectionEntry
+            icon="code-slash-outline"
+            title="Cursor"
+            description={formatCursorEngineDescription(cursorCredentials, cursorCredentialsLoading)}
+            status={formatCursorEngineStatus(cursorCredentials, cursorCredentialsLoading)}
+            statusTone={
+              cursorConnected ? 'connected' : cursorCredentials?.configured ? 'warning' : 'muted'
+            }
+            actionLabel={cursorActionLabel}
+            busy={cursorCredentialsLoading && !cursorCredentials}
+            onAction={cursorActionLabel ? () => handleConnectEngine('cursor') : undefined}
+          />
+          <EngineConnectionEntry
+            icon="layers-outline"
+            title="OpenCode"
+            description={
+              opencodeConnected
+                ? 'OpenCode is available for new chats.'
+                : 'Enable OpenCode on the bridge or hosted workspace.'
+            }
+            status={opencodeConnected ? 'Connected' : 'Not connected'}
+            statusTone={opencodeConnected ? 'connected' : 'muted'}
+            actionLabel={opencodeActionLabel}
+            onAction={opencodeActionLabel ? () => handleConnectEngine('opencode') : undefined}
+            isLast
+          />
+        </BlurView>
+
+        <Text style={styles.subtleHintText}>
+          Codex is connected by default. Cursor uses a Cursor API key on the bridge; OpenCode uses
+          the provider credentials configured for OpenCode.
+        </Text>
+        {engineActionMessage ? (
+          <Text style={styles.successText}>{engineActionMessage}</Text>
+        ) : null}
+
+        <Text style={[styles.sectionLabel, styles.sectionLabelGap]}>Cursor Details</Text>
+        <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
+          {cursorCredentialsLoading && !cursorCredentials ? (
+            <View style={styles.accountLoadingState}>
+              <ActivityIndicator color={colors.textPrimary} />
+              <Text style={styles.settingValue}>Checking Cursor credentials…</Text>
+            </View>
+          ) : (
+            <>
+              <Row
+                label="Status"
+                value={formatCursorCredentialStatus(cursorCredentials)}
+                valueColor={statusColor}
+              />
+              <Row
+                label="Source"
+                value={formatCursorCredentialSource(cursorCredentials)}
+              />
+              <Row
+                label="Runtime"
+                value={formatCursorRuntimeStatus(cursorCredentials)}
+              />
+              {cursorCredentials?.apiKeyName ? (
+                <Row label="Key" value={cursorCredentials.apiKeyName} />
+              ) : null}
+              {cursorCredentials?.userEmail ? (
+                <Row label="Email" value={cursorCredentials.userEmail} />
+              ) : null}
+              {cursorCredentials?.createdAt ? (
+                <Row
+                  label="Created"
+                  value={formatCursorCredentialDate(cursorCredentials.createdAt)}
+                />
+              ) : null}
+              <Row label="Usage" value="Not exposed by Cursor API" isLast />
+            </>
+          )}
+        </BlurView>
+
+        {cursorCredentialsError ? (
+          <Text style={styles.errorText}>{cursorCredentialsError}</Text>
+        ) : null}
+        {cursorCredentials?.error ? (
+          <Text style={styles.errorText}>{cursorCredentials.error}</Text>
+        ) : null}
+      </>
+    );
+  };
 
   const renderLegalContent = () => (
     <>
@@ -1579,11 +1917,7 @@ export function SettingsScreen({
       <Text style={styles.sectionLabel}>Support Clawdex</Text>
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
         <LinearGradient
-          colors={
-            theme.isDark
-              ? ['rgba(26, 33, 44, 0.96)', 'rgba(17, 22, 31, 0.94)']
-              : ['#FFFFFF', '#EEF4FB']
-          }
+          colors={[theme.colors.bgElevated, theme.colors.bgItem]}
           style={styles.tipHeroPanel}
         >
           <View style={styles.tipHero}>
@@ -1750,6 +2084,8 @@ export function SettingsScreen({
         return renderLimitsContent();
       case 'bridge':
         return renderBridgeContent();
+      case 'engines':
+        return renderEnginesContent();
       case 'tips':
         return renderTipsContent();
       case 'legal':
@@ -1831,10 +2167,19 @@ export function SettingsScreen({
       <SelectionSheet
         visible={appearanceModalVisible}
         eyebrow="Appearance"
-        title="Theme"
-        subtitle="Choose whether the mobile app follows the system appearance or uses an explicit mode."
+        title="Light / Dark"
+        subtitle="Choose whether the app follows system appearance or stays light or dark."
         options={appearanceOptions}
         onClose={() => setAppearanceModalVisible(false)}
+      />
+
+      <SelectionSheet
+        visible={darkPaletteModalVisible}
+        eyebrow="Appearance"
+        title="Dark palette"
+        subtitle="Used whenever the app is in dark mode."
+        options={darkPaletteOptions}
+        onClose={() => setDarkPaletteModalVisible(false)}
       />
 
       <SelectionSheet
@@ -1846,12 +2191,13 @@ export function SettingsScreen({
         onClose={() => setFontModalVisible(false)}
       />
 
-      <SelectionSheet
+      <BridgeProfileManagerSheet
         visible={bridgeProfileModalVisible}
-        eyebrow="Bridge Profiles"
-        title="Switch active bridge"
-        subtitle="Pick which saved server this phone should connect to right now."
-        options={bridgeProfileOptions}
+        profiles={bridgeProfiles}
+        activeProfileId={activeBridgeProfileId}
+        onActivate={onSwitchBridgeProfile}
+        onRename={onRenameBridgeProfile}
+        onDelete={onDeleteBridgeProfile}
         onClose={() => setBridgeProfileModalVisible(false)}
       />
 
@@ -1884,6 +2230,15 @@ export function SettingsScreen({
         subtitle="This only affects command and file-change approvals."
         options={approvalModeOptions}
         onClose={() => setApprovalModeModalVisible(false)}
+      />
+
+      <SelectionSheet
+        visible={workspaceChatLimitModalVisible}
+        eyebrow="Sidebar"
+        title="Chats per workspace"
+        subtitle="Choose how many chats each workspace shows before the Show all row."
+        options={workspaceChatLimitOptions}
+        onClose={() => setWorkspaceChatLimitModalVisible(false)}
       />
 
       <SelectionSheet
@@ -1938,43 +2293,16 @@ function Row({
   );
 }
 
-function EngineAvailabilityRow({
-  engine,
-  available,
-  active,
-  isLast,
-}: {
-  engine: ChatEngine;
-  available: boolean;
-  active: boolean;
-  isLast?: boolean;
-}) {
-  const theme = useAppTheme();
-  const value = available
-    ? active
-      ? 'Available · active'
-      : 'Available'
-    : 'Not installed on bridge';
-  const valueColor = available ? theme.colors.statusComplete : theme.colors.textMuted;
-
-  return (
-    <Row
-      label={getChatEngineLabel(engine)}
-      value={value}
-      valueColor={valueColor}
-      isLast={isLast}
-    />
-  );
-}
-
 function MenuEntry({
   icon,
+  logo,
   title,
   description,
   onPress,
   isLast,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
+  logo?: 'github' | 'clawdex';
   title: string;
   description: string;
   onPress: () => void;
@@ -1995,7 +2323,17 @@ function MenuEntry({
     >
       <View style={styles.menuRowLeft}>
         <View style={styles.menuIconWrap}>
-          <Ionicons name={icon} size={16} color={colors.textPrimary} />
+          {logo === 'github' ? (
+            <Ionicons name="logo-github" size={17} color={colors.textPrimary} />
+          ) : logo === 'clawdex' ? (
+            <Image
+              source={clawdexMark}
+              resizeMode="contain"
+              style={[styles.menuLogoImage, { tintColor: colors.textPrimary }]}
+            />
+          ) : (
+            <Ionicons name={icon} size={16} color={colors.textPrimary} />
+          )}
         </View>
         <View style={styles.menuTextWrap}>
           <Text style={styles.menuTitle}>{title}</Text>
@@ -2006,6 +2344,78 @@ function MenuEntry({
       </View>
       <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
     </Pressable>
+  );
+}
+
+type EngineStatusTone = 'connected' | 'warning' | 'muted';
+
+function EngineConnectionEntry({
+  icon,
+  title,
+  description,
+  status,
+  statusTone,
+  actionLabel,
+  busy,
+  onAction,
+  isLast,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  description: string;
+  status: string;
+  statusTone: EngineStatusTone;
+  actionLabel?: string;
+  busy?: boolean;
+  onAction?: () => void;
+  isLast?: boolean;
+}) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const { colors } = theme;
+  const statusColor =
+    statusTone === 'connected'
+      ? colors.statusComplete
+      : statusTone === 'warning'
+        ? colors.warning
+        : colors.textMuted;
+
+  return (
+    <View style={[styles.engineRow, isLast && styles.engineRowLast]}>
+      <View style={styles.menuIconWrap}>
+        <Ionicons name={icon} size={16} color={colors.textPrimary} />
+      </View>
+      <View style={styles.engineTextWrap}>
+        <View style={styles.engineTitleLine}>
+          <Text style={styles.menuTitle}>{title}</Text>
+          <View style={[styles.engineStatusPill, { borderColor: statusColor }]}>
+            <Text style={[styles.engineStatusText, { color: statusColor }]} numberOfLines={1}>
+              {status}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.menuDescription} numberOfLines={2}>
+          {description}
+        </Text>
+      </View>
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.engineConnectBtn,
+            busy && styles.settingRowDisabled,
+            pressed && !busy && styles.engineConnectBtnPressed,
+          ]}
+        >
+          {busy ? (
+            <ActivityIndicator color={theme.colors.accentText} size="small" />
+          ) : (
+            <Text style={styles.engineConnectBtnText}>{actionLabel}</Text>
+          )}
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -2065,6 +2475,17 @@ function formatInstallKind(kind: BridgeRuntimeInfo['installKind']): string {
   }
 }
 
+function readOptionalDisplayString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
 function formatBridgeUpdaterState(state: string): string {
   switch (state) {
     case 'scheduled':
@@ -2099,22 +2520,15 @@ function isBridgeMaintenanceInProgress(state: string): boolean {
 }
 
 const createStyles = (theme: AppTheme) => {
-  const settingsCardBackground = theme.isDark ? theme.colors.bgCanvasAccent : '#F3F7FB';
-  const settingsCardBorder = theme.isDark
-    ? theme.colors.borderHighlight
-    : 'rgba(71, 85, 105, 0.22)';
-  const settingsDivider = theme.isDark
-    ? theme.colors.borderLight
-    : 'rgba(71, 85, 105, 0.16)';
-  const settingsCardShadow = theme.isDark
-    ? undefined
-    : '0px 14px 30px rgba(15, 31, 54, 0.10)';
-  const neutralControlBackground = theme.isDark ? theme.colors.bgMain : '#D9E2EB';
-  const neutralControlPressed = theme.isDark ? theme.colors.bgItem : '#CCD6E0';
-  const settingsLabelColor = theme.isDark ? theme.colors.textMuted : '#536172';
-  const settingsValueColor = theme.isDark ? theme.colors.textSecondary : '#3F4C5A';
-  const settingsPrimaryText = theme.isDark ? theme.colors.textPrimary : '#263341';
-  const hintTextColor = theme.isDark ? theme.colors.textMuted : '#556270';
+  const settingsCardBackground = theme.colors.bgCanvasAccent;
+  const settingsCardBorder = theme.colors.borderHighlight;
+  const settingsDivider = theme.colors.borderLight;
+  const neutralControlBackground = theme.colors.bgInput;
+  const neutralControlPressed = theme.colors.bgItem;
+  const settingsLabelColor = theme.colors.textMuted;
+  const settingsValueColor = theme.colors.textSecondary;
+  const settingsPrimaryText = theme.colors.textPrimary;
+  const hintTextColor = theme.colors.textMuted;
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.bgMain },
     safeArea: { flex: 1 },
@@ -2125,8 +2539,6 @@ const createStyles = (theme: AppTheme) => {
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
       backgroundColor: theme.colors.bgMain,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.borderHighlight,
     },
     menuBtn: { padding: theme.spacing.xs },
     headerTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
@@ -2154,12 +2566,11 @@ const createStyles = (theme: AppTheme) => {
       marginBottom: theme.spacing.xs,
       overflow: 'hidden',
       backgroundColor: settingsCardBackground,
-      boxShadow: settingsCardShadow,
     },
     sectionLabel: {
       ...theme.typography.caption,
       textTransform: 'uppercase',
-      letterSpacing: 0.8,
+      letterSpacing: 0,
       marginTop: theme.spacing.sm,
       marginBottom: theme.spacing.sm,
       color: settingsLabelColor,
@@ -2284,6 +2695,35 @@ const createStyles = (theme: AppTheme) => {
       color: theme.colors.accentText,
       fontSize: 15,
     },
+    credentialInput: {
+      ...theme.typography.body,
+      minHeight: 48,
+      marginTop: theme.spacing.md,
+      marginBottom: theme.spacing.md,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: settingsCardBorder,
+      backgroundColor: neutralControlBackground,
+      color: settingsPrimaryText,
+      paddingHorizontal: theme.spacing.md,
+    },
+    credentialPrimaryBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: theme.spacing.sm,
+      marginBottom: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      paddingHorizontal: theme.spacing.md,
+      backgroundColor: theme.colors.accent,
+      borderRadius: theme.radius.md,
+      boxShadow: `0px 4px 8px ${theme.colors.accent}4D`,
+    },
+    credentialPrimaryBtnText: {
+      ...theme.typography.headline,
+      color: theme.colors.accentText,
+      fontSize: 15,
+    },
     linkRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -2316,6 +2756,10 @@ const createStyles = (theme: AppTheme) => {
       justifyContent: 'center',
       backgroundColor: neutralControlBackground,
     },
+    menuLogoImage: {
+      width: 18,
+      height: 18,
+    },
     menuTextWrap: {
       flex: 1,
       gap: 3,
@@ -2328,6 +2772,56 @@ const createStyles = (theme: AppTheme) => {
     menuDescription: {
       ...theme.typography.caption,
       color: settingsValueColor,
+    },
+    engineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: settingsDivider,
+    },
+    engineRowLast: {
+      borderBottomWidth: 0,
+    },
+    engineTextWrap: {
+      flex: 1,
+      gap: 4,
+      minWidth: 0,
+    },
+    engineTitleLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      flexWrap: 'wrap',
+    },
+    engineStatusPill: {
+      borderRadius: theme.radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: 2,
+    },
+    engineStatusText: {
+      ...theme.typography.caption,
+      fontWeight: '700',
+    },
+    engineConnectBtn: {
+      minWidth: 78,
+      minHeight: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.accent,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+    },
+    engineConnectBtnPressed: {
+      backgroundColor: theme.colors.accentPressed,
+    },
+    engineConnectBtnText: {
+      ...theme.typography.caption,
+      color: theme.colors.accentText,
+      fontWeight: '700',
     },
     tipHero: {
       flexDirection: 'row',
@@ -2360,7 +2854,7 @@ const createStyles = (theme: AppTheme) => {
       ...theme.typography.caption,
       color: settingsLabelColor,
       textTransform: 'uppercase',
-      letterSpacing: 0.8,
+      letterSpacing: 0,
     },
     tipHeroTitle: {
       ...theme.typography.headline,
@@ -2382,7 +2876,7 @@ const createStyles = (theme: AppTheme) => {
       borderRadius: theme.radius.md,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.md,
-      backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.78)',
+      backgroundColor: theme.colors.bgItem,
       borderWidth: 1,
       borderColor: settingsCardBorder,
       gap: 4,
@@ -2535,12 +3029,189 @@ function formatReasoningEffort(effort: ReasoningEffort): string {
   return effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
-function formatAccountType(account: AccountSnapshot | null): string {
+function formatRateLimitsError(error: unknown): string {
+  const message = String((error as Error)?.message ?? error).trim();
+  const normalized = message.toLowerCase();
+  const authRequired =
+    normalized.includes('codex account authentication required') ||
+    normalized.includes('account authentication required') ||
+    normalized.includes('authentication required to read rate limits') ||
+    normalized.includes('requires openai auth') ||
+    normalized.includes('chatgptauthtokens/refresh');
+
+  if (authRequired) {
+    return 'Codex is not signed in on this connection. Finish Codex login on the bridge host, then reconnect.';
+  }
+
+  return message || 'Unable to read Codex usage limits.';
+}
+
+function formatAccountSignInStatus(account: AccountSnapshot | null): string {
   if (!account?.type) {
-    return 'Signed out';
+    return 'Not signed in';
   }
 
   return account.type === 'chatgpt' ? 'ChatGPT' : 'API key';
+}
+
+function formatAccountHelpText(account: AccountSnapshot | null): string {
+  if (!account) {
+    return 'Check whether this connection is signed in before starting chats.';
+  }
+
+  if (account.type) {
+    return 'This connection is signed in and ready to use.';
+  }
+
+  if (account.requiresOpenaiAuth) {
+    return 'This connection still needs a ChatGPT or API sign-in before chats will work.';
+  }
+
+  return 'This connection can be used without a separate account sign-in.';
+}
+
+function mergeChatEngines(
+  engines: readonly ChatEngine[],
+  ...extraEngines: Array<ChatEngine | null | undefined>
+): ChatEngine[] {
+  const merged: ChatEngine[] = [];
+  for (const engine of [...engines, ...extraEngines]) {
+    if (
+      (engine === 'codex' || engine === 'opencode' || engine === 'cursor') &&
+      !merged.includes(engine)
+    ) {
+      merged.push(engine);
+    }
+  }
+
+  return merged.length > 0 ? merged : ['codex'];
+}
+
+function formatEnginesSummary(
+  availableEngines: readonly ChatEngine[],
+  status: CursorCredentialStatus | null,
+  loading: boolean
+): string {
+  const connected = new Set<ChatEngine>(availableEngines);
+  connected.add('codex');
+  if (status?.valid === true && status.runtimeAvailable) {
+    connected.add('cursor');
+  }
+
+  const parts = [...connected].map((engine) => getChatEngineLabel(engine));
+  if (parts.length >= 3) {
+    return 'Codex, Cursor, OpenCode connected';
+  }
+  if (parts.length > 1) {
+    return `${parts.join(', ')} connected`;
+  }
+  if (loading && !status) {
+    return 'Codex connected · Checking Cursor';
+  }
+  if (!status) {
+    return 'Codex connected';
+  }
+  if (!status.configured) {
+    return 'Codex connected · Cursor API key required';
+  }
+  if (status.valid === true) {
+    return status.runtimeAvailable ? 'Codex and Cursor connected' : 'Codex connected · Cursor key saved';
+  }
+  if (status.valid === false) {
+    return 'Codex connected · Cursor key invalid';
+  }
+  return 'Codex connected · Cursor status unknown';
+}
+
+function formatCursorEngineDescription(
+  status: CursorCredentialStatus | null,
+  loading: boolean
+): string {
+  if (loading && !status) {
+    return 'Checking the Cursor API key on this connection.';
+  }
+  if (!status?.configured) {
+    return 'Connect with a Cursor API key on the bridge.';
+  }
+  if (status.valid === false) {
+    return 'The saved Cursor API key needs attention.';
+  }
+  if (status.valid === true && status.runtimeAvailable) {
+    return 'Cursor is available for new chats.';
+  }
+  if (status.valid === true) {
+    return 'Cursor key is saved; restart the bridge if it is not available.';
+  }
+  return 'Cursor key status is not available yet.';
+}
+
+function formatCursorEngineStatus(
+  status: CursorCredentialStatus | null,
+  loading: boolean
+): string {
+  if (loading && !status) {
+    return 'Checking';
+  }
+  if (!status?.configured) {
+    return 'Not connected';
+  }
+  if (status.valid === false) {
+    return 'Key invalid';
+  }
+  if (status.valid === true && status.runtimeAvailable) {
+    return 'Connected';
+  }
+  if (status.valid === true) {
+    return 'Key saved';
+  }
+  return 'Unknown';
+}
+
+function formatCursorCredentialStatus(status: CursorCredentialStatus | null): string {
+  if (!status) {
+    return 'Not checked';
+  }
+  if (!status.configured) {
+    return 'Not configured';
+  }
+  if (status.valid === true) {
+    return 'Connected';
+  }
+  if (status.valid === false) {
+    return 'Invalid';
+  }
+  return 'Unknown';
+}
+
+function formatCursorCredentialSource(status: CursorCredentialStatus | null): string {
+  if (!status?.source) {
+    return 'None';
+  }
+  if (status.source === 'env') {
+    return 'clawdex init';
+  }
+  return 'None';
+}
+
+function formatCursorRuntimeStatus(status: CursorCredentialStatus | null): string {
+  if (!status) {
+    return 'Unknown';
+  }
+  if (!status.enabled) {
+    return 'Not enabled';
+  }
+  if (status.runtimeAvailable) {
+    return status.active ? 'Active' : 'Ready';
+  }
+  return 'Waiting for key';
+}
+
+function formatCursorCredentialDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
 }
 
 function formatPlanType(planType: PlanType): string {
