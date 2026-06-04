@@ -1,7 +1,7 @@
 # Squidex
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Mohit-Patil/squidex-mobile/main/screenshots/social/squidex-social-poster-1200x675.png" alt="Squidex social banner" width="100%" />
+  <img src="https://raw.githubusercontent.com/drewsephski/squidex-mobile/main/screenshots/social/squidex-social-poster-1200x675.png" alt="Squidex social banner" width="100%" />
 </p>
 
 Run Codex or OpenCode from your phone. `squidex-mobile` ships the bridge CLI plus bundled Rust bridge binaries for supported hosts, and the mobile app pairs to that bridge over Tailscale or local LAN.
