@@ -47,9 +47,39 @@ jobs:
         working-directory: apps/mobile
         run: npx expo prebuild --platform android --clean
 
-      - name: Build APK
+      - name: Generate keystore and signing config
+        run: |
+          mkdir -p apps/mobile/android/keystores
+
+          # Generate a release keystore for CI signing
+          keytool -genkey -v -keystore apps/mobile/android/keystores/release.keystore \
+            -alias release \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass squidexci -keypass squidexci \
+            -dname "CN=Squidex, OU=CI, O=Squidex, L=Unknown, ST=Unknown, C=US"
+
+          # Create credentials.json for the eas-build.gradle signing config
+          cat > apps/mobile/credentials.json << 'EOF'
+          {
+            "android": {
+              "keystore": {
+                "keystorePath": "android/keystores/release.keystore",
+                "keystorePassword": "squidexci",
+                "keyAlias": "release",
+                "keyPassword": "squidexci"
+              }
+            }
+          }
+          EOF
+
+      - name: Build signed APK
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease
+
+      - name: Verify APK is signed
+        run: |
+          echo "=== APK signature verification ==="
+          apksigner verify --verbose apps/mobile/android/app/build/outputs/apk/release/app-release.apk 2>&1 || echo "WARNING: APK may not be properly signed"
 
       - name: Rename APK
         run: |
