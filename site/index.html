@@ -3,52 +3,465 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Squidex Support</title>
+    <title>Squidex — AI coding tools, in your pocket</title>
     <meta
       name="description"
-      content="Support, privacy policy, and terms for Squidex."
+      content="Squidex is a mobile companion for Codex, OpenCode, and Cursor. Control your AI coding environment from your phone over a secure private bridge."
     />
-    <link rel="stylesheet" href="./styles.css" />
+    <meta name="theme-color" content="#0B0C0E" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Squidex — AI coding tools, in your pocket" />
+    <meta property="og:description" content="Control Codex, OpenCode, and Cursor from your phone over a secure private bridge." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://squidex.app" />
+    <meta property="og:image" content="https://squidex.app/images/mark.png" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Squidex — AI coding tools, in your pocket" />
+    <meta name="twitter:description" content="Control Codex, OpenCode, and Cursor from your phone over a secure private bridge." />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/favicon.png" />
+    <link rel="apple-touch-icon" href="/images/favicon.png" />
+
+    <!-- Google Fonts: Syne + Sora + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">Squidex</p>
-        <h1>Support and legal information for App Store review and users.</h1>
-        <p>
-          Squidex is a companion app for a user-hosted bridge running on infrastructure you
-          control. Use the links below for support, privacy, and terms information.
+    <!-- Noise / Grain Texture Overlay -->
+    <svg class="noise-overlay" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true">
+      <filter id="noiseFilter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
+        <feColorMatrix type="saturate" values="0" />
+      </filter>
+      <rect width="100%" height="100%" filter="url(#noiseFilter)" opacity="0.035" />
+    </svg>
+
+    <!-- Navigation -->
+    <nav class="site-nav" role="navigation" aria-label="Primary">
+      <div class="container">
+        <a href="/" class="nav-logo" aria-label="Squidex home">
+          <img src="/images/mark.png" alt="" width="28" height="28" />
+          <span>Squidex</span>
+        </a>
+        <div class="nav-links" id="nav-links">
+          <a href="/support/">Support</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="#" class="btn btn-accent nav-cta">Get started</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section" aria-label="Hero">
+      <div class="hero-bg-glow" aria-hidden="true"></div>
+      <div class="container">
+        <div class="hero-content">
+          <div class="hero-badge">
+            v1.0 &middot; Open source
+          </div>
+          <h1 class="hero-title">
+            Your AI coding<br />
+            <span class="text-gradient-warm">environment.</span><br />
+            In your pocket.
+          </h1>
+          <p class="hero-subtitle">
+            Control Codex, OpenCode, and Cursor from your phone over a secure private
+            bridge. Chat, approve, voice, and manage your coding workflow remotely.
+          </p>
+          <div class="hero-actions">
+            <a href="#" class="btn btn-accent btn-lg">
+              Get started
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+              </svg>
+            </a>
+            <a href="#how-it-works" class="btn btn-outline btn-lg">
+              How it works
+            </a>
+          </div>
+        </div>
+
+        <!-- Hero Visual: Phone Mockup -->
+        <div class="hero-visual" aria-hidden="true">
+          <div class="phone-glow"></div>
+          <div class="phone-mockup">
+            <div class="phone-notch"></div>
+            <div class="phone-statusbar">
+              <span>9:41</span>
+              <div class="phone-status-icons">
+                <svg viewBox="0 0 24 24"><rect x="1" y="9" width="4" height="12" rx="1"/><rect x="7" y="6" width="4" height="15" rx="1"/><rect x="13" y="3" width="4" height="18" rx="1"/><rect x="19" y="7" width="4" height="14" rx="1"/></svg>
+              </div>
+            </div>
+            <div class="phone-screen">
+              <div class="phone-chat-header">
+                <div class="phone-chat-avatar">C</div>
+                <div>
+                  <div class="phone-chat-name">Codex</div>
+                  <div class="phone-chat-status">Connected &middot; Private bridge</div>
+                </div>
+              </div>
+              <div class="phone-messages">
+                <div class="message message-user message-delay-1">Build a REST API with Node.js</div>
+                <div class="message message-bot message-delay-2">
+                  <strong>I'll scaffold that.</strong> Creating an Express API with routes, controllers, and middleware.
+                </div>
+                <div class="message message-user message-delay-3">Add authentication</div>
+                <div class="message message-bot message-delay-4">
+                  Adding JWT auth with <code>jsonwebtoken</code> and middleware chain.
+                  <div class="typing-indicator">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="phone-homebar"></div>
+          </div>
+
+          <!-- Decorative elements -->
+          <div class="hero-decoration" aria-hidden="true">
+            <span class="hero-decoration-bracket">{</span>
+            <span class="hero-decoration-bracket">}</span>
+            <span class="hero-decoration-dot"></span>
+            <span class="hero-decoration-dot"></span>
+            <span class="hero-decoration-dot"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Engine Support Section -->
+    <section class="engines-section" aria-label="Supported engines">
+      <div class="container text-center">
+        <span class="section-label">Supported engines</span>
+        <h2>Works with your favorite AI coding tools</h2>
+        <p class="text-secondary" style="margin-top: 12px; max-width: 540px; margin-left: auto; margin-right: auto;">
+          Squidex connects to the tools you already use through a single, secure bridge on your machine.
         </p>
-        <nav class="nav" aria-label="Primary">
-          <a class="cta" href="./support/">Open support</a>
-          <a class="cta secondary" href="./privacy/">Privacy policy</a>
-          <a class="cta secondary" href="./terms/">Terms of service</a>
-        </nav>
-      </section>
-      <section class="grid">
-        <article class="card">
-          <h2>Support</h2>
-          <p>
-            Primary support contact: <a href="mailto:contact@arkaledge.com">contact@arkaledge.com</a>
+        <div class="engines-grid reveal-stagger" id="engines-grid">
+          <article class="engine-card reveal">
+            <div class="engine-icon">
+              <img src="/images/engine-codex.png" alt="Codex" width="32" height="32" />
+            </div>
+            <h3 class="engine-name">Codex</h3>
+            <p class="engine-desc">Full Codex CLI integration — send prompts, review outputs, and manage sessions from your phone.</p>
+          </article>
+          <article class="engine-card reveal">
+            <div class="engine-icon">
+              <img src="/images/engine-opencode.png" alt="OpenCode" width="32" height="32" />
+            </div>
+            <h3 class="engine-name">OpenCode</h3>
+            <p class="engine-desc">Seamless OpenCode support with real-time streaming, approvals, and voice input capabilities.</p>
+          </article>
+          <article class="engine-card reveal">
+            <div class="engine-icon">
+              <img src="/images/engine-cursor.png" alt="Cursor" width="32" height="32" />
+            </div>
+            <h3 class="engine-name">Cursor</h3>
+            <p class="engine-desc">Extend Cursor AI's reach to your mobile — approve edits, run commands, and stay in the loop.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="steps-section" id="how-it-works" aria-label="How it works">
+      <div class="container">
+        <div class="steps-header">
+          <span class="section-label">How it works</span>
+          <h2>Up and running in three steps</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 480px; margin-left: auto; margin-right: auto;">
+            No cloud accounts, no subscriptions. Just your machine, your bridge, and your phone.
           </p>
-          <p>Technical bug reports can also be filed on GitHub if email is not required.</p>
-        </article>
-        <article class="card">
-          <h2>Privacy</h2>
-          <p>
-            Read how Squidex processes connection details, prompts, attachments, and
-            optional voice input.
+        </div>
+        <div class="steps-grid reveal-stagger" id="steps-grid">
+          <article class="step-card reveal">
+            <div class="step-number">1</div>
+            <div>
+              <h3 class="step-title">Install the bridge</h3>
+              <p class="step-desc">
+                Run a single command in your terminal to set up the private bridge on your development machine.
+              </p>
+              <span class="step-code">npx squidex init</span>
+            </div>
+          </article>
+          <article class="step-card reveal">
+            <div class="step-number">2</div>
+            <div>
+              <h3 class="step-title">Start the service</h3>
+              <p class="step-desc">
+                Launch the bridge on your local network or Tailscale. It auto-generates a secure connection URL.
+              </p>
+              <span class="step-code">squidex start</span>
+            </div>
+          </article>
+          <article class="step-card reveal">
+            <div class="step-number">3</div>
+            <div>
+              <h3 class="step-title">Pair your phone</h3>
+              <p class="step-desc">
+                Open Squidex, scan or enter your bridge URL, and start controlling your AI tools from anywhere.
+              </p>
+              <span class="step-code">Connect via app</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" aria-label="Features">
+      <div class="container">
+        <div class="features-header">
+          <span class="section-label">Capabilities</span>
+          <h2>Everything you need, remotely</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 520px; margin-left: auto; margin-right: auto;">
+            Squidex brings the full coding workflow to your phone without sacrificing control or context.
           </p>
-        </article>
-        <article class="card">
-          <h2>Terms</h2>
-          <p>
-            Review acceptable use, credential handling, operational risk, and service
-            availability terms.
-          </p>
-        </article>
-      </section>
-      <p class="meta">Last updated: March 11, 2026</p>
-    </main>
+        </div>
+        <div class="features-grid reveal-stagger" id="features-grid">
+          <!-- Real-time streaming -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Real-time streaming</h3>
+            <p class="feature-desc">
+              Watch AI responses stream in live. No polling, no refresh — just instant updates from your coding assistant.
+            </p>
+          </article>
+
+          <!-- Approvals & clarifications -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Approvals &amp; clarifications</h3>
+            <p class="feature-desc">
+              Review and approve every action. Clarify intent and stay in control of changes from the palm of your hand.
+            </p>
+          </article>
+
+          <!-- Voice input -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Voice input</h3>
+            <p class="feature-desc">
+              Dictate prompts with voice-to-text. Keep your flow going without breaking focus to type on a small screen.
+            </p>
+          </article>
+
+          <!-- Git operations -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Git operations</h3>
+            <p class="feature-desc">
+              Stage, commit, push, and review diffs. Full Git control from your phone when you are away from your desk.
+            </p>
+          </article>
+
+          <!-- Terminal access -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Terminal access</h3>
+            <p class="feature-desc">
+              Execute commands, run scripts, and monitor output from a mobile terminal — securely proxied through your bridge.
+            </p>
+          </article>
+
+          <!-- Local web preview -->
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Local web preview</h3>
+            <p class="feature-desc">
+              Preview rendered output, logs, and web content from your local dev environment right on your phone.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section" aria-label="Get started">
+      <div class="cta-bg-glow" aria-hidden="true"></div>
+      <div class="content-slim">
+        <span class="section-label" style="margin: 0 auto 16px;">Get Squidex</span>
+        <h2 class="cta-title">
+          Your AI tools are<br />
+          <span class="text-gradient-warm">waiting in your pocket.</span>
+        </h2>
+        <p class="cta-subtitle">
+          Download Squidex and connect to your private bridge. No cloud, no subscriptions — just your machine and your phone.
+        </p>
+        <div class="cta-actions">
+          <a href="#" class="btn btn-accent btn-lg">
+            Get started for free
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+            </svg>
+          </a>
+          <a href="#" class="btn btn-outline btn-lg">
+            View on GitHub
+          </a>
+        </div>
+        <div class="store-badges" style="margin-top: 24px;">
+          <a href="#" class="store-badge" aria-label="Download on the App Store">
+            <span class="store-badge-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+              </svg>
+            </span>
+            <span class="store-badge-text">
+              <span class="store-badge-label">Download on the</span>
+              <span class="store-badge-name">App Store</span>
+            </span>
+          </a>
+          <a href="#" class="store-badge" aria-label="Get it on Google Play">
+            <span class="store-badge-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3.609 1.814L13.792 12 3.61 22.186a.996.996 0 0 1-.61-.92V2.734a1 1 0 0 1 .609-.92zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.199l2.807 1.626a1 1 0 0 1 0 1.732l-2.807 1.626L15.206 12l2.492-2.492zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
+              </svg>
+            </span>
+            <span class="store-badge-text">
+              <span class="store-badge-label">Get it on</span>
+              <span class="store-badge-name">Google Play</span>
+            </span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <img src="/images/mark.png" alt="" width="20" height="20" />
+            <span>&copy; 2026 Squidex</span>
+          </div>
+          <nav class="footer-links" aria-label="Footer">
+            <a href="/support/">Support</a>
+            <a href="/privacy/">Privacy</a>
+            <a href="/terms/">Terms</a>
+            <a href="https://github.com/Mohit-Patil/squidex-mobile">GitHub</a>
+          </nav>
+          <span class="footer-copy">Built for developers who code anywhere.</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- JavaScript: Mobile menu + scroll reveals -->
+    <script>
+      (function() {
+        'use strict';
+
+        // Mobile nav toggle
+        const toggle = document.getElementById('nav-toggle');
+        const links = document.getElementById('nav-links');
+
+        if (toggle && links) {
+          toggle.addEventListener('click', function() {
+            const isOpen = links.classList.toggle('open');
+            toggle.classList.toggle('active');
+            toggle.setAttribute('aria-expanded', isOpen);
+          });
+
+          // Close on link click
+          links.querySelectorAll('a').forEach(function(link) {
+            link.addEventListener('click', function() {
+              links.classList.remove('open');
+              toggle.classList.remove('active');
+              toggle.setAttribute('aria-expanded', 'false');
+            });
+          });
+
+          // Close on escape
+          document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && links.classList.contains('open')) {
+              links.classList.remove('open');
+              toggle.classList.remove('active');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+        }
+
+        // Scroll-triggered reveals using Intersection Observer
+        var revealElements = document.querySelectorAll('.reveal:not(.reveal-stagger)');
+        var staggerParents = document.querySelectorAll('.reveal-stagger');
+
+        if ('IntersectionObserver' in window) {
+          var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                observer.unobserve(entry.target);
+              }
+            });
+          }, {
+            threshold: 0.10,
+            rootMargin: '0px 0px -40px 0px'
+          });
+
+          revealElements.forEach(function(el) {
+            observer.observe(el);
+          });
+
+          staggerParents.forEach(function(parent) {
+            observer.observe(parent);
+          });
+        } else {
+          // Fallback: show everything immediately
+          revealElements.forEach(function(el) { el.classList.add('visible'); });
+          staggerParents.forEach(function(el) { el.classList.add('visible'); });
+        }
+      })();
+    </script>
   </body>
 </html>
