@@ -11,10 +11,10 @@
     "react-native"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/Mohit-Patil/squidex-mobile#readme",
+  "homepage": "https://github.com/drewsephski/squidex-mobile#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Mohit-Patil/squidex-mobile.git"
+    "url": "git+https://github.com/drewsephski/squidex-mobile.git"
   },
   "publishConfig": {
     "access": "public"
