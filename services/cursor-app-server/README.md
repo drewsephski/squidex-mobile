@@ -1,4 +1,4 @@
-# @clawdex/cursor-app-server
+# @squidex/cursor-app-server
 
 App-server shaped JSON-RPC adapter for Cursor agents.
 

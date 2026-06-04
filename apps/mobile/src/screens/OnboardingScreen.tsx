@@ -59,8 +59,8 @@ type ConnectionCheck =
 type OnboardingStep = 'intro' | 'connect';
 type PairingPayload = { bridgeToken: string; bridgeUrl?: string };
 
-const BRIDGE_SETUP_COMMANDS = 'npm install -g clawdex-mobile@latest\nclawdex init';
-const CLAWDEX_BRIDGE_SETUP_URL = 'https://getclawdex.com/bridge-setup/';
+const BRIDGE_SETUP_COMMANDS = 'npm install -g squidex-mobile@latest\nsquidex init';
+const SQUIDEX_BRIDGE_SETUP_URL = 'https://getsquidex.com/bridge-setup/';
 const SETUP_STAGES = [
   {
     title: 'Start',
@@ -490,7 +490,7 @@ export function OnboardingScreen({
       setScannerLocked(true);
       const pairing = parsePairingPayload(result.data);
       if (!pairing) {
-        setScannerError('QR code is not a valid Clawdex bridge pairing code.');
+        setScannerError('QR code is not a valid Squidex bridge pairing code.');
         setTimeout(() => {
           setScannerLocked(false);
         }, 1200);
@@ -528,7 +528,7 @@ export function OnboardingScreen({
               <View style={styles.introHeader}>
                 <View style={styles.introBrandRow}>
                   <BrandMark size={24} />
-                  <Text style={styles.introBrandName}>Clawdex</Text>
+                  <Text style={styles.introBrandName}>Squidex</Text>
                 </View>
               </View>
 
@@ -598,7 +598,7 @@ export function OnboardingScreen({
               <Animated.View style={[styles.introFooter, introActionsAnimatedStyle]}>
                 <ChoiceAction
                   variant="primary"
-                  logo="clawdex"
+                  logo="squidex"
                   title="Private connection"
                   meta="Your machine"
                   onPress={goToConnectStep}
@@ -836,7 +836,7 @@ export function OnboardingScreen({
                   <View style={styles.primaryButtonContent}>
                     <View style={styles.primaryButtonCopy}>
                       <Text style={styles.primaryButtonText}>{continueLabel}</Text>
-                      <Text style={styles.primaryButtonSubtext}>Start using Clawdex</Text>
+                      <Text style={styles.primaryButtonSubtext}>Start using Squidex</Text>
                     </View>
                     <Ionicons name="arrow-forward" size={20} color={theme.colors.accentText} />
                   </View>
@@ -989,11 +989,11 @@ function CommandSnippet({
     }, 1400);
   }, [command]);
   const handleShareGuide = useCallback(() => {
-    const title = 'Clawdex bridge setup';
+    const title = 'Squidex bridge setup';
     void Share.share(
       Platform.OS === 'ios'
-        ? { title, url: CLAWDEX_BRIDGE_SETUP_URL }
-        : { title, message: `${title}\n${CLAWDEX_BRIDGE_SETUP_URL}` }
+        ? { title, url: SQUIDEX_BRIDGE_SETUP_URL }
+        : { title, message: `${title}\n${SQUIDEX_BRIDGE_SETUP_URL}` }
     ).catch(() => {});
   }, []);
 
@@ -1129,9 +1129,11 @@ function parsePairingPayload(rawValue: string): PairingPayload | null {
     if (
       bridgeToken &&
       (
-        type === 'clawdex-bridge-pair' ||
+        type === 'squidex-bridge-pair' ||
+        type === 'squidex/bridge-pair' ||
         type === 'clawdex/bridge-pair' ||
-        type === 'clawdex-bridge-token' ||
+        type === 'squidex-bridge-token' ||
+        type === 'squidex/bridge-token' ||
         type === 'clawdex/bridge-token' ||
         !type
       )
@@ -1144,7 +1146,7 @@ function parsePairingPayload(rawValue: string): PairingPayload | null {
 
   try {
     const parsed = new URL(raw);
-    if (parsed.protocol !== 'clawdex:') {
+    if (parsed.protocol !== 'squidex:') {
       return null;
     }
     const bridgeUrl =

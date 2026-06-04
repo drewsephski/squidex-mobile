@@ -2,7 +2,7 @@
 
 ## Supported Scope
 
-`clawdex-mobile` is intended for trusted/private networks only.
+`squidex-mobile` is intended for trusted/private networks only.
 It is not designed to be exposed directly to the public internet.
 
 Security reports are especially valuable for:

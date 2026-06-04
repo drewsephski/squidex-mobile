@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class SetupWindowPresenter {
-    static let shared = SetupWindowPresenter()
+final class SettingsWindowPresenter {
+    static let shared = SettingsWindowPresenter()
 
     private var window: NSWindow?
 
@@ -15,17 +15,17 @@ final class SetupWindowPresenter {
             return
         }
 
-        let rootView = OnboardingView()
+        let rootView = DesktopSettingsView(mode: .settings)
             .environmentObject(controller)
             .frame(minWidth: 760, minHeight: 560)
         let hostingView = NSHostingView(rootView: rootView)
-        let window = SetupWindow(
+        let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Clawdex Setup"
+        window.title = "Squidex Settings"
         window.isReleasedWhenClosed = false
         window.contentView = hostingView
         window.center()
@@ -44,7 +44,7 @@ final class SetupWindowPresenter {
     }
 }
 
-private final class SetupWindow: NSWindow {
+private final class SettingsWindow: NSWindow {
     var onClose: (() -> Void)?
 
     override func close() {

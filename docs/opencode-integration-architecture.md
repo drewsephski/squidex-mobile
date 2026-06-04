@@ -59,7 +59,7 @@ The integration must preserve these current invariants:
 3. The Rust bridge remains the single live event authority for reconnect, replay, approvals, and user input.
 4. The current Codex app-server path remains the default and must continue to work unchanged.
 
-## Current Clawdex Constraints
+## Current Squidex Constraints
 
 The current app is tightly coupled to one normalized bridge protocol:
 
@@ -167,11 +167,11 @@ Important streaming detail:
 - Live UI updates come from SSE plus state reads.
 - `POST /session/:id/prompt_async` is the safer write path for bridge-driven streaming.
 
-## Key Mismatch With Clawdex
+## Key Mismatch With Squidex
 
 `opencode` is native `session/message/part`.
 
-Clawdex mobile is native `thread/turn/item`.
+Squidex mobile is native `thread/turn/item`.
 
 That means the bridge must normalize and project `opencode` state into the current mobile model.
 

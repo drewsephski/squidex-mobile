@@ -178,7 +178,7 @@ export function getTipTierDescription(aPackage: PurchasesPackage): string {
     return description;
   }
 
-  return 'One-time support for Clawdex development.';
+  return 'One-time support for Squidex development.';
 }
 
 export function getTipTierMeta(aPackage: PurchasesPackage): string {

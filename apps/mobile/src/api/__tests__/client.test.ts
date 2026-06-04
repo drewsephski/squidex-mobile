@@ -2204,7 +2204,7 @@ describe('HostBridgeApiClient', () => {
                     },
                     {
                       type: 'localImage',
-                      path: '.clawdex-mobile-attachments/example.png',
+                      path: '.squidex-mobile-attachments/example.png',
                     },
                   ],
                 },
@@ -2221,7 +2221,7 @@ describe('HostBridgeApiClient', () => {
         { path: 'apps/mobile/src/screens/MainScreen.tsx' },
         { path: 'apps/mobile/src/api/client.ts', name: 'client.ts' },
       ],
-      localImages: [{ path: '.clawdex-mobile-attachments/example.png' }],
+      localImages: [{ path: '.squidex-mobile-attachments/example.png' }],
     });
 
     expect(ws.request).toHaveBeenNthCalledWith(
@@ -2245,7 +2245,7 @@ describe('HostBridgeApiClient', () => {
           }),
           expect.objectContaining({
             type: 'localImage',
-            path: '.clawdex-mobile-attachments/example.png',
+            path: '.squidex-mobile-attachments/example.png',
           }),
         ]),
       })
@@ -2255,7 +2255,7 @@ describe('HostBridgeApiClient', () => {
   it('uploadAttachment() calls bridge/attachments/upload', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({
-      path: '.clawdex-mobile-attachments/file.txt',
+      path: '.squidex-mobile-attachments/file.txt',
       fileName: 'file.txt',
       mimeType: 'text/plain',
       sizeBytes: 10,
@@ -2276,7 +2276,7 @@ describe('HostBridgeApiClient', () => {
       mimeType: 'text/plain',
       kind: 'file',
     });
-    expect(uploaded.path).toBe('.clawdex-mobile-attachments/file.txt');
+    expect(uploaded.path).toBe('.squidex-mobile-attachments/file.txt');
   });
 
   it('interruptTurn() calls turn/interrupt with thread and turn id', async () => {

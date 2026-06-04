@@ -77,21 +77,21 @@ coverage/
 *.pid
 *.seed
 .bridge-update-status.json
-.clawdex-push-registry.json
+.squidex-push-registry.json
 .claude/
-.clawdex-mobile-attachments/
+.squidex-mobile-attachments/
 /app.json
 export-cheat-sheet.local.md
 .agents/
 skills-lock.json
-apps/clawdex-store-screenshots/
+apps/squidex-store-screenshots/
 screenshots/
 screenshot-preview.png
 .playwright-mcp/
 .playwright-cli/
 /demo/
 /output/
-/apps/clawdex-demo-video/
+/apps/squidex-demo-video/
 
 # Local store-submission credentials (review bridge token etc.) — never commit
 docs/release-notes/*-credentials.local.md

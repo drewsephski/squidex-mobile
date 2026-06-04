@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct ClawdexDesktopApp: App {
+struct SquidexDesktopApp: App {
     @StateObject private var controller: BridgeController
 
     init() {

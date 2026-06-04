@@ -92,7 +92,7 @@ export interface AppTheme {
   statusBarStyle: 'dark-content' | 'light-content';
 }
 
-/** Deep OLED-friendly dark (original Clawdex mobile dark). */
+/** Deep OLED-friendly dark (original Squidex dark). */
 const darkClassicColors: AppColors = {
   bgMain: '#000000',
   bgSidebar: '#0C0D10',

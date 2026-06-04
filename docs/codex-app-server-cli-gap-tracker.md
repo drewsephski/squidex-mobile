@@ -3,7 +3,7 @@
 Last updated: March 20, 2026
 
 ## Scope
-This tracker compares `clawdex-mobile` against current Codex app-server + CLI capabilities and records what still needs to be added.
+This tracker compares `squidex-mobile` against current Codex app-server + CLI capabilities and records what still needs to be added.
 
 ## Gap 1: App-Server Protocol Parity
 Status: In progress (first implementation pass completed)

@@ -182,7 +182,7 @@ describe('ChatMessage Cursor rendering', () => {
       role: 'system',
       systemKind: 'tool',
       content:
-        '• Called tool `read`\n  └ Input: /repo/package.json\n    { "name": "clawdex-mobile" }',
+        '• Called tool `read`\n  └ Input: /repo/package.json\n    { "name": "squidex-mobile" }',
       createdAt: '2026-04-17T00:00:00.000Z',
     };
 

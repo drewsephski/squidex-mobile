@@ -359,7 +359,7 @@ describe('CursorAppServer', () => {
     const driver = new MockDriver();
     const server = new CursorAppServer({
       runtime: 'local',
-      cwd: '/workspace/clawdex-mobile',
+      cwd: '/workspace/squidex-mobile',
       apiKey: 'cursor-key',
       defaultModel: 'cursor-small',
       driver,
@@ -373,7 +373,7 @@ describe('CursorAppServer', () => {
     });
 
     expect(driver.listAgentCwds).toEqual([
-      '/workspace/clawdex-mobile',
+      '/workspace/squidex-mobile',
       '/workspace/launchkit',
     ]);
     expect((listed.data as Array<{ cwd: string }>).map((thread) => thread.cwd)).toEqual([
@@ -383,13 +383,13 @@ describe('CursorAppServer', () => {
 
   it('uses Cursor transcript folders to reclassify agents stored under the bridge cwd', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'cursor-workspace-map-'));
-    const clawdexCwd = join(tempDir, 'serious-projects', 'clawdex-mobile');
+    const squidexCwd = join(tempDir, 'serious-projects', 'squidex-mobile');
     const launchkitCwd = join(tempDir, 'serious-projects', 'launchkit');
     const projectsDir = join(tempDir, '.cursor', 'projects');
     const agentId = 'cursor-agent-launchkit';
 
     await mkdir(launchkitCwd, { recursive: true });
-    await mkdir(clawdexCwd, { recursive: true });
+    await mkdir(squidexCwd, { recursive: true });
     await mkdir(
       join(
         projectsDir,
@@ -425,11 +425,11 @@ describe('CursorAppServer', () => {
         createdAt: now,
         status: 'finished',
         runtime: 'local',
-        cwd: clawdexCwd,
+        cwd: squidexCwd,
       });
       const server = new CursorAppServer({
         runtime: 'local',
-        cwd: clawdexCwd,
+        cwd: squidexCwd,
         apiKey: 'cursor-key',
         defaultModel: 'cursor-small',
         cursorProjectsDir: projectsDir,
@@ -445,7 +445,7 @@ describe('CursorAppServer', () => {
         threadId: agentId,
         cwd: launchkitCwd,
       });
-      expect(driver.lastGetOptions?.cwd).toBe(clawdexCwd);
+      expect(driver.lastGetOptions?.cwd).toBe(squidexCwd);
       expect((read.thread as { cwd: string }).cwd).toBe(launchkitCwd);
 
       await server.request('turn/start', {
@@ -455,7 +455,7 @@ describe('CursorAppServer', () => {
       });
       expect(driver.lastResumeOptions).toMatchObject({
         cwd: launchkitCwd,
-        storeCwd: clawdexCwd,
+        storeCwd: squidexCwd,
       });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -477,7 +477,7 @@ describe('CursorAppServer', () => {
     });
     const server = new CursorAppServer({
       runtime: 'local',
-      cwd: '/workspace/clawdex-mobile',
+      cwd: '/workspace/squidex-mobile',
       apiKey: 'cursor-key',
       defaultModel: 'cursor-small',
       driver,
@@ -958,7 +958,7 @@ describe('CursorAppServer', () => {
     });
     const server = new CursorAppServer({
       runtime: 'local',
-      cwd: '/workspace/clawdex-mobile',
+      cwd: '/workspace/squidex-mobile',
       apiKey: 'cursor-key',
       defaultModel: 'cursor-small',
       driver,
@@ -1071,7 +1071,7 @@ describe('CursorAppServer', () => {
 
     await expect(server.request('initialize')).resolves.toMatchObject({
       serverInfo: {
-        name: '@clawdex/cursor-app-server',
+        name: '@squidex/cursor-app-server',
       },
     });
   });

@@ -3,16 +3,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClawdexDesktop",
+    name: "SquidexDesktop",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "ClawdexDesktop", targets: ["ClawdexDesktop"])
+        .executable(name: "SquidexDesktop", targets: ["SquidexDesktop"])
     ],
     targets: [
         .executableTarget(
-            name: "ClawdexDesktop",
+            name: "SquidexDesktop",
             resources: [
                 .process("Resources")
             ]

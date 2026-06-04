@@ -309,8 +309,8 @@ export class CursorAppServer {
   private initialize(): Record<string, unknown> {
     return {
       serverInfo: {
-        name: '@clawdex/cursor-app-server',
-        title: 'Clawdex Cursor App Server',
+        name: '@squidex/cursor-app-server',
+        title: 'Squidex Cursor App Server',
         version: '0.1.0',
       },
       capabilities: {

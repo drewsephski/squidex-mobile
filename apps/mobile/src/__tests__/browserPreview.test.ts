@@ -149,7 +149,7 @@ describe('browserPreview', () => {
   it('maps proxied backend preview navigation URLs back to their loopback origin', () => {
     expect(
       mapBrowserPreviewNavigationUrlToTargetUrl(
-        'http://100.108.165.85:8788/__clawdex_proxy__/aHR0cDovLzEyNy4wLjAuMTozMDAz/api/waitlist?source=landing',
+        'http://100.108.165.85:8788/__squidex_proxy__/aHR0cDovLzEyNy4wLjAuMTozMDAz/api/waitlist?source=landing',
         'http://100.108.165.85:8788',
         'http://127.0.0.1:3000/'
       )

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -L)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -L)"
-ROOT_DIR="${CLAWDEX_WORKSPACE_ROOT:-${INIT_CWD:-$(pwd -L)}}"
+ROOT_DIR="${SQUIDEX_WORKSPACE_ROOT:-${INIT_CWD:-$(pwd -L)}}"
 if [[ ! -d "$ROOT_DIR" ]]; then
   ROOT_DIR="$PACKAGE_ROOT"
 fi
@@ -54,7 +54,7 @@ info() { rail_echo "${BLUE}$*${RESET}"; }
 warn() { rail_echo "${YELLOW}$*${RESET}"; }
 ok() { rail_echo "${GREEN}$*${RESET}"; }
 fail() { printf "%s ${RED}%s${RESET}\n" "$RAIL_GLYPH" "$*" >&2; }
-SETUP_VERBOSE_INSTALLS="${CLAWDEX_SETUP_VERBOSE:-false}"
+SETUP_VERBOSE_INSTALLS="${SQUIDEX_SETUP_VERBOSE:-false}"
 
 run_quiet_command() {
   local label="$1"
@@ -66,7 +66,7 @@ run_quiet_command() {
     return $?
   fi
 
-  log_file="$(mktemp "${TMPDIR:-/tmp}/clawdex-onboarding.XXXXXX.log")"
+  log_file="$(mktemp "${TMPDIR:-/tmp}/squidex-onboarding.XXXXXX.log")"
   if "$@" >"$log_file" 2>&1; then
     rm -f "$log_file"
     return 0
@@ -1072,7 +1072,7 @@ print_existing_setup_summary() {
 require_security_ack() {
   print_note_box "Security" "Security warning - please read.
 
-Clawdex is still evolving. Expect sharp edges.
+Squidex is still evolving. Expect sharp edges.
 The bridge can execute terminal commands and git actions.
 A bad prompt could trick it into unsafe operations.
 
@@ -1282,7 +1282,7 @@ ensure_opencode_cli() {
     fi
 
     if ! command -v opencode >/dev/null 2>&1 && ! confirm_prompt "Retry OpenCode CLI check?" "Y"; then
-      abort_wizard "Install OpenCode CLI and rerun: clawdex init --engine opencode"
+      abort_wizard "Install OpenCode CLI and rerun: squidex init --engine opencode"
     fi
   done
 
@@ -1311,7 +1311,7 @@ ensure_cursor_app_server() {
   fi
 
   if [[ -z "$resolved_cursor_app_server_bin" ]]; then
-    abort_wizard "cursor-app-server was not found. Upgrade clawdex-mobile so npm links the bundled command, then rerun: clawdex init --engine cursor"
+    abort_wizard "cursor-app-server was not found. Upgrade squidex-mobile so npm links the bundled command, then rerun: squidex init --engine cursor"
   fi
 
   if [[ "$resolved_cursor_app_server_bin" == */* ]]; then
@@ -1346,7 +1346,7 @@ ensure_cursor_app_server() {
       print_note_box "Cursor API key" "Create a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, then paste it here.
 Cursor docs: https://docs.cursor.com/en/cli/reference/authentication
 
-This is the Cursor agent/SDK key used by Clawdex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
+This is the Cursor agent/SDK key used by Squidex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
       CURSOR_API_KEY="$(prompt_secret_value "Enter Cursor API key:")"
       CURSOR_CONFIG_NEEDS_WRITE="true"
       ok "Cursor API key will be updated in $SECURE_ENV_FILE."
@@ -1356,9 +1356,9 @@ This is the Cursor agent/SDK key used by Clawdex. It is not the OpenAI, Anthropi
     print_note_box "Cursor API key" "Create a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, then paste it here.
 Cursor docs: https://docs.cursor.com/en/cli/reference/authentication
 
-This is the Cursor agent/SDK key used by Clawdex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
+This is the Cursor agent/SDK key used by Squidex. It is not the OpenAI, Anthropic, or other provider key configured inside the Cursor editor."
     if ! confirm_prompt "Add Cursor API key now?" "Y"; then
-      abort_wizard "Cursor was selected but CURSOR_API_KEY is missing. Re-run clawdex init after creating a Cursor API key."
+      abort_wizard "Cursor was selected but CURSOR_API_KEY is missing. Re-run squidex init after creating a Cursor API key."
     fi
     CURSOR_API_KEY="$(prompt_secret_value "Enter Cursor API key:")"
     CURSOR_CONFIG_NEEDS_WRITE="true"
@@ -1549,7 +1549,7 @@ Steps:
   Android: https://play.google.com/store/apps/details?id=com.tailscale.ipn
 - Open the Tailscale app on phone and log in.
 - Confirm your phone and this machine both appear in the same Tailscale network.
-- Keep Tailscale connected while using Clawdex."
+- Keep Tailscale connected while using Squidex."
 }
 
 confirm_phone_tailscale_quickstart() {
@@ -1743,7 +1743,7 @@ if [[ ! -t 0 ]]; then
   exit 1
 fi
 
-echo "${BOLD}Clawdex onboarding${RESET}"
+echo "${BOLD}Squidex onboarding${RESET}"
 rail_echo "Guided setup for secure bridge launch."
 rail_echo "Project root: $ROOT_DIR"
 rail_echo "${DIM}Use Up/Down (or j/k) and Enter to select.${RESET}"
@@ -1759,7 +1759,7 @@ ensure_core_tools
 if has_packaged_bridge_binary; then
   ok "Found packaged Rust bridge binary for this host."
 else
-  abort_wizard "No packaged bridge binary found for this host. Reinstall clawdex-mobile so npm installs the bundled bridge binary, then rerun setup."
+  abort_wizard "No packaged bridge binary found for this host. Reinstall squidex-mobile so npm installs the bundled bridge binary, then rerun setup."
 fi
 
 section "Config handling"
@@ -1901,7 +1901,7 @@ if [[ "$AUTO_START" == "true" ]]; then
     rail_echo "Bridge token: $BRIDGE_TOKEN"
   fi
   rail_echo "Bridge logs: $ROOT_DIR/.bridge.log"
-  rail_echo "2) Stop the bridge later with: clawdex stop"
+  rail_echo "2) Stop the bridge later with: squidex stop"
 else
   rail_echo "1) cd $ROOT_DIR && npm run secure:bridge"
   rail_echo "2) Open the mobile app and use onboarding to connect (URL + token QR)."

@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -L)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -L)"
-APP_PATH="${1:-$ROOT_DIR/dist/macos/Clawdex.app}"
-PROFILE="${CLAWDEX_NOTARY_PROFILE:-clawdex-notary}"
-SUBMIT_ZIP="$ROOT_DIR/dist/macos/Clawdex-submit.zip"
-OUTPUT_ZIP="$ROOT_DIR/dist/macos/Clawdex-notarized.zip"
+APP_PATH="${1:-$ROOT_DIR/dist/macos/Squidex.app}"
+PROFILE="${SQUIDEX_NOTARY_PROFILE:-squidex-notary}"
+SUBMIT_ZIP="$ROOT_DIR/dist/macos/Squidex-submit.zip"
+OUTPUT_ZIP="$ROOT_DIR/dist/macos/Squidex-notarized.zip"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "App bundle not found: $APP_PATH" >&2

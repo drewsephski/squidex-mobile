@@ -8,7 +8,7 @@ Related engineering reference:
 
 ## Submission Snapshot
 
-- App name: Clawdex
+- App name: Squidex
 - Version / build: [fill in]
 - Date prepared: [fill in]
 - Primary reviewer contact: [name + email + phone]
@@ -16,7 +16,7 @@ Related engineering reference:
 
 ## What The App Does
 
-Clawdex is a companion app for a bridge running on infrastructure the user controls.
+Squidex is a companion app for a bridge running on infrastructure the user controls.
 The iPhone and iPad app connects to that bridge and lets the user:
 
 - Start new Codex runs and continue existing threads
@@ -39,8 +39,8 @@ Reviewer should use a dedicated review bridge.
 Optional fallback if App Review specifically asks for self-host setup:
 
 ```bash
-npm install -g clawdex-mobile@latest
-clawdex init
+npm install -g squidex-mobile@latest
+squidex init
 ```
 
 Then:

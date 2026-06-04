@@ -1,9 +1,9 @@
 import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from './bridgeUrl';
 
 const defaultPrivacyPolicyUrl =
-  'https://mohit-patil.github.io/clawdex-mobile/privacy/';
+  'https://mohit-patil.github.io/squidex-mobile/privacy/';
 const defaultTermsOfServiceUrl =
-  'https://mohit-patil.github.io/clawdex-mobile/terms/';
+  'https://mohit-patil.github.io/squidex-mobile/terms/';
 
 const legacyHostBridgeUrl = normalizeBridgeUrlInput(
   process.env.EXPO_PUBLIC_HOST_BRIDGE_URL ??

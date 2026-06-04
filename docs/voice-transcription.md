@@ -21,7 +21,7 @@ The bridge resolves transcription credentials in order:
 2. `BRIDGE_CHATGPT_ACCESS_TOKEN` env var → `https://chatgpt.com/backend-api/transcribe` (no model param)
 3. Legacy ChatGPT auth tokens previously handed to Codex from the mobile app:
    - cached in bridge memory
-   - persisted in `~/.clawdex/chatgpt-auth.json`
+   - persisted in `~/.squidex/chatgpt-auth.json`
 4. `~/.codex/auth.json` fallback:
    - `OPENAI_API_KEY` field present → same as path 1
    - `auth_mode: "chatgpt"` with `tokens.access_token` → same as path 2

@@ -43,7 +43,7 @@ import type {
   ReasoningEffort,
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
-import clawdexMark from '../../assets/brand/mark.png';
+import squidexMark from '../../assets/brand/mark.png';
 import type { BridgeProfile } from '../bridgeProfiles';
 import { BridgeProfileManagerSheet } from '../components/bridge-profile-manager-sheet';
 import { SelectionSheet, type SelectionSheetOption } from '../components/SelectionSheet';
@@ -300,7 +300,7 @@ export function SettingsScreen({
             setPushError('Notifications permission was not granted.');
             Alert.alert(
               'Notifications unavailable',
-              'Allow notifications for Clawdex in your system settings, then try again. Push notifications also require a physical device.'
+              'Allow notifications for Squidex in your system settings, then try again. Push notifications also require a physical device.'
             );
           }
         } else {
@@ -466,7 +466,7 @@ export function SettingsScreen({
               : route === 'appearance'
                 ? 'Appearance'
                 : route === 'tips'
-                  ? 'Support Clawdex'
+                  ? 'Support Squidex'
                   : route === 'legal'
                     ? 'Legal'
                     : 'Settings';
@@ -950,7 +950,7 @@ export function SettingsScreen({
 
     try {
       await purchaseTipPackage(aPackage);
-      setTipActionMessage('Thanks for supporting Clawdex.');
+      setTipActionMessage('Thanks for supporting Squidex.');
     } catch (err) {
       if (!isRevenueCatPurchaseCancelled(err)) {
         setTipActionError((err as Error).message);
@@ -977,7 +977,7 @@ export function SettingsScreen({
 
       const result = await presentTipPaywall(nextOffering);
       if (result === 'purchased') {
-        setTipActionMessage('Thanks for supporting Clawdex.');
+        setTipActionMessage('Thanks for supporting Squidex.');
       } else if (result === 'restored') {
         setTipActionMessage('Previous tip purchase restored.');
       } else if (result === 'notPresented') {
@@ -990,7 +990,7 @@ export function SettingsScreen({
     }
   }, [tipOffering, tipPackages]);
 
-  const handleOpenSupportClawdex = useCallback(() => {
+  const handleOpenSupportSquidex = useCallback(() => {
     if (nativeTipPaywallAvailable) {
       void handleOpenTipPaywall();
       return;
@@ -1255,10 +1255,10 @@ export function SettingsScreen({
 
   const handleConnectEngine = useCallback(
     (engine: Exclude<ChatEngine, 'codex'>) => {
-      const command =
-        engine === 'cursor'
-          ? 'clawdex init --engines codex,cursor'
-          : 'clawdex init --engines codex,opencode';
+        const command =
+          engine === 'cursor'
+            ? 'squidex init --engines codex,cursor'
+            : 'squidex init --engines codex,opencode';
       setEngineActionMessage(`Run ${command} on the bridge host, then restart the connection.`);
     },
     []
@@ -1402,16 +1402,16 @@ export function SettingsScreen({
         {canRateOnAppStore ? (
           <MenuEntry
             icon="star-outline"
-            title="Rate Clawdex"
+            title="Rate Squidex"
             description="Leave a rating or written review on the App Store"
             onPress={handleOpenAppStoreReview}
           />
         ) : null}
         <MenuEntry
           icon="heart-outline"
-          title="Support Clawdex"
+          title="Support Squidex"
           description={tipJarSummary}
-          onPress={handleOpenSupportClawdex}
+          onPress={handleOpenSupportSquidex}
         />
         <MenuEntry
           icon="document-text-outline"
@@ -1767,7 +1767,7 @@ export function SettingsScreen({
         {(onAddBridgeProfile || shouldOpenPrivateBridgeEditor) ? (
           <MenuEntry
             icon="hardware-chip-outline"
-            logo="clawdex"
+            logo="squidex"
             title="Private bridge"
             description={
               shouldOpenPrivateBridgeEditor
@@ -2054,7 +2054,7 @@ export function SettingsScreen({
 
   const renderTipsContent = () => (
     <>
-      <Text style={styles.sectionLabel}>Support Clawdex</Text>
+      <Text style={styles.sectionLabel}>Support Squidex</Text>
       <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
         <LinearGradient
           colors={[theme.colors.bgElevated, theme.colors.bgItem]}
@@ -2442,7 +2442,7 @@ function MenuEntry({
   isLast,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
-  logo?: 'github' | 'clawdex';
+  logo?: 'github' | 'squidex';
   title: string;
   description: string;
   onPress: () => void;
@@ -2465,9 +2465,9 @@ function MenuEntry({
         <View style={styles.menuIconWrap}>
           {logo === 'github' ? (
             <Ionicons name="logo-github" size={17} color={colors.textPrimary} />
-          ) : logo === 'clawdex' ? (
+          ) : logo === 'squidex' ? (
             <Image
-              source={clawdexMark}
+              source={squidexMark}
               resizeMode="contain"
               style={[styles.menuLogoImage, { tintColor: colors.textPrimary }]}
             />
@@ -3328,7 +3328,7 @@ function formatCursorCredentialSource(status: CursorCredentialStatus | null): st
     return 'None';
   }
   if (status.source === 'env') {
-    return 'clawdex init';
+    return 'squidex init';
   }
   return 'None';
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@clawdex/cursor-app-server",
+  "name": "@squidex/cursor-app-server",
   "version": "0.1.0",
   "description": "App-server shaped JSON-RPC adapter for Cursor agents.",
   "license": "MIT",

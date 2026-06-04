@@ -717,7 +717,7 @@ function ComposeView({ onSuggestion }: { onSuggestion: (s: string) => void }) {
     <View style={styles.composeContainer}>
       <Ionicons name="cube-outline" size={40} color={colors.textMuted} style={styles.composeIcon} />
       <Text style={styles.composeTitle}>Let's build</Text>
-      <Text style={styles.composeSubtitle}>clawdex-mobile</Text>
+      <Text style={styles.composeSubtitle}>squidex-mobile</Text>
       <View style={styles.suggestions}>
         {SUGGESTIONS.slice(0, 2).map((s) => (
           <Pressable

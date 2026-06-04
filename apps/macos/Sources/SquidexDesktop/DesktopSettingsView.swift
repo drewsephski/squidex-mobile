@@ -89,9 +89,9 @@ struct DesktopSettingsView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                BrandIconView(asset: .clawdex, size: 32)
+                BrandIconView(asset: .squidex, size: 32)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Clawdex")
+                    Text("Squidex")
                         .font(.title2)
                         .fontWeight(.semibold)
                     Text(mode == .onboarding ? "Setup" : "Settings")

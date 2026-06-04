@@ -217,13 +217,13 @@ impl UpdateService {
         match action {
             BridgeMaintenanceAction::Update if !self.is_self_update_supported() => {
                 return Err(
-                    "Bridge self-update is only supported for published clawdex-mobile CLI installs."
+                    "Bridge self-update is only supported for published squidex-mobile CLI installs."
                         .to_string(),
                 );
             }
             BridgeMaintenanceAction::Restart if !self.is_safe_restart_supported() => {
                 return Err(
-                    "Bridge safe restart requires a detected clawdex-mobile install with .env.secure and launcher scripts available."
+                    "Bridge safe restart requires a detected squidex-mobile install with .env.secure and launcher scripts available."
                         .to_string(),
                 );
             }
@@ -314,7 +314,7 @@ async fn fetch_latest_npm_version() -> Option<String> {
         .build()
         .ok()?;
     let response = client
-        .get("https://registry.npmjs.org/-/package/clawdex-mobile/dist-tags")
+        .get("https://registry.npmjs.org/-/package/squidex-mobile/dist-tags")
         .send()
         .await
         .ok()?;
@@ -361,7 +361,7 @@ fn detect_install_kind(path: &Path) -> BridgeInstallKind {
         return BridgeInstallKind::SourceCheckout;
     }
 
-    if path.join("bin").join("clawdex.js").is_file()
+    if path.join("bin").join("squidex.js").is_file()
         && path.join("scripts").join("bridge-self-update.js").is_file()
     {
         return BridgeInstallKind::PublishedCli;

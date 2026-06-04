@@ -1000,7 +1000,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
                   <BrandMark size={18} />
                 </View>
                 <View style={styles.heroCopy}>
-                  <Text style={styles.heroTitle}>Clawdex</Text>
+                  <Text style={styles.heroTitle}>Squidex</Text>
                   <Text style={styles.heroMeta} numberOfLines={1}>
                     {formatCompactCount(chats.length)} chats · {formatCompactCount(runningChatCount)} live
                   </Text>

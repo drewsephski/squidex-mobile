@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Clawdex Mobile",
-    "slug": "clawdex-mobile",
-    "scheme": "clawdex",
+    "name": "Squidex",
+    "slug": "squidex-mobile",
+    "scheme": "squidex",
     "version": "5.2.3",
     "userInterfaceStyle": "automatic",
     "orientation": "portrait",
@@ -23,7 +23,7 @@
           "NSAllowsLocalNetworking": true
         }
       },
-      "bundleIdentifier": "com.mohitpatil973.clawdexmobile"
+      "bundleIdentifier": "com.squidex.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -36,7 +36,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "googleServicesFile": "./google-services.json",
-      "package": "com.mohitpatil973.clawdexmobile"
+      "package": "com.squidex.mobile"
     },
     "web": {
       "favicon": "./assets/brand/favicon.png"
@@ -54,21 +54,21 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Clawdex uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat."
+          "cameraPermission": "Squidex uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Clawdex uses your photo library so you can choose an image from your phone and attach it to a chat prompt or workflow sent to your own host bridge.",
-          "cameraPermission": "Clawdex uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat.",
-          "microphonePermission": "Clawdex uses the microphone to record a short voice message that is transcribed into your chat input."
+          "photosPermission": "Squidex uses your photo library so you can choose an image from your phone and attach it to a chat prompt or workflow sent to your own host bridge.",
+          "cameraPermission": "Squidex uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat.",
+          "microphonePermission": "Squidex uses the microphone to record a short voice message that is transcribed into your chat input."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "Clawdex uses the microphone to record a short voice message that is transcribed into your chat input.",
+          "microphonePermission": "Squidex uses the microphone to record a short voice message that is transcribed into your chat input.",
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }

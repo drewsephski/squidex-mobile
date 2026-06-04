@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -L)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -L)"
-APP_PATH="${1:-$ROOT_DIR/dist/macos/Clawdex.app}"
-IDENTITY="${CLAWDEX_CODESIGN_IDENTITY:-}"
+APP_PATH="${1:-$ROOT_DIR/dist/macos/Squidex.app}"
+IDENTITY="${SQUIDEX_CODESIGN_IDENTITY:-}"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "App bundle not found: $APP_PATH" >&2
@@ -28,7 +28,7 @@ fi
 
 if [ -z "$IDENTITY" ]; then
   echo "No code signing identity found." >&2
-  echo "Install a Developer ID Application certificate for distribution, or set CLAWDEX_CODESIGN_IDENTITY='-' for an ad-hoc local signature." >&2
+  echo "Install a Developer ID Application certificate for distribution, or set SQUIDEX_CODESIGN_IDENTITY='-' for an ad-hoc local signature." >&2
   exit 1
 fi
 
@@ -46,7 +46,7 @@ if [ -f "$APP_PATH/Contents/Resources/codex-rust-bridge" ]; then
   codesign "${SIGN_ARGS[@]}" "$APP_PATH/Contents/Resources/codex-rust-bridge"
 fi
 
-codesign "${SIGN_ARGS[@]}" "$APP_PATH/Contents/MacOS/ClawdexDesktop"
+codesign "${SIGN_ARGS[@]}" "$APP_PATH/Contents/MacOS/SquidexDesktop"
 codesign "${SIGN_ARGS[@]}" "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"

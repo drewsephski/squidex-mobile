@@ -152,7 +152,7 @@ CURSOR_API_KEY="${EXISTING_CURSOR_API_KEY:-}"
 CURSOR_MODEL="${EXISTING_CURSOR_MODEL:-}"
 
 if [[ "$SKIP_STOP" != "true" ]]; then
-  info "Stopping existing Clawdex services for a clean restart"
+  info "Stopping existing Squidex services for a clean restart"
   (
     cd "$ROOT_DIR"
     npm run stop:services

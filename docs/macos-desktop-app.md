@@ -1,11 +1,11 @@
 # macOS Desktop App
 
-This is the Mac-only replacement path for asking users to operate the `clawdex` npm package directly.
+This is the Mac-only replacement path for asking users to operate the `squidex` npm package directly.
 
 The product shape is:
 
-- a native SwiftUI menu-bar app named Clawdex
-- a bundled `codex-rust-bridge` binary in `Clawdex.app/Contents/Resources`
+- a native SwiftUI menu-bar app named Squidex
+- a bundled `codex-rust-bridge` binary in `Squidex.app/Contents/Resources`
 - first-run setup for work folder, phone-reachable host, port, token, and mobile defaults
 - a Settings window for connection, enabled engines, approval mode, transcript visibility, appearance, and advanced pairing options
 - menu-bar status for bridge health, connected phone clients, and the pairing QR
@@ -66,7 +66,7 @@ App bundle:
 npm run desktop:mac:bundle
 ```
 
-The bundle script builds the Rust bridge in release mode, builds the SwiftUI app, and writes `dist/macos/Clawdex.app`.
+The bundle script builds the Rust bridge in release mode, builds the SwiftUI app, and writes `dist/macos/Squidex.app`.
 
 Sign the app bundle:
 
@@ -82,7 +82,7 @@ Notarize and staple the app:
 npm run desktop:mac:notarize
 ```
 
-This expects a notary keychain profile named `clawdex-notary`. The script submits a ZIP to Apple, waits for acceptance, staples the ticket to `dist/macos/Clawdex.app`, verifies Gatekeeper acceptance, and writes `dist/macos/Clawdex-notarized.zip` for distribution.
+This expects a notary keychain profile named `squidex-notary`. The script submits a ZIP to Apple, waits for acceptance, staples the ticket to `dist/macos/Squidex.app`, verifies Gatekeeper acceptance, and writes `dist/macos/Squidex-notarized.zip` for distribution.
 
 ## Next Slices
 

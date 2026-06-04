@@ -11,7 +11,7 @@ The setup wizard now lets you choose which harnesses the phone should control.
 If you want Codex, OpenCode, and Cursor:
 
 ```bash
-clawdex init --engines codex,opencode,cursor
+squidex init --engines codex,opencode,cursor
 ```
 
 From a source checkout, the equivalent command is:
@@ -20,7 +20,7 @@ From a source checkout, the equivalent command is:
 npm run setup:wizard -- --engines codex,opencode,cursor
 ```
 
-That writes `BRIDGE_ENABLED_ENGINES=codex,opencode,cursor` into `.env.secure`, so the bridge starts the selected backends and the mobile app can control them from one UI. When Cursor is selected, `clawdex init` uses the bundled `cursor-app-server`, asks for a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, and saves it in `.env.secure`. Cursor documents this under CLI authentication: https://docs.cursor.com/en/cli/reference/authentication
+That writes `BRIDGE_ENABLED_ENGINES=codex,opencode,cursor` into `.env.secure`, so the bridge starts the selected backends and the mobile app can control them from one UI. When Cursor is selected, `squidex init` uses the bundled `cursor-app-server`, asks for a Cursor account API key from Cursor Dashboard > Integrations > User API Keys, and saves it in `.env.secure`. Cursor documents this under CLI authentication: https://docs.cursor.com/en/cli/reference/authentication
 
 If you want only one harness, use `--engine codex`, `--engine opencode`, or `--engine cursor`.
 
@@ -28,7 +28,7 @@ Cursor usage limits are not exposed by Cursor's public API today. The app shows 
 
 ## Onboarding Output Cues
 
-After `clawdex init`, expected sequence:
+After `squidex init`, expected sequence:
 
 1. Secure config is written or reused
 2. The bridge starts in the background
@@ -37,7 +37,7 @@ After `clawdex init`, expected sequence:
 
 Published npm releases bundle prebuilt bridge binaries for `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `linux-armv7l`, and `win32-x64`. On those hosts, normal bridge startup does not require a Rust compile.
 
-`clawdex init` does not run a project-local `npm install` for the published CLI path. The only required npm install there is `npm install -g clawdex-mobile@latest`.
+`squidex init` does not run a project-local `npm install` for the published CLI path. The only required npm install there is `npm install -g squidex-mobile@latest`.
 
 Published CLI installs are bridge-only. They do not include the Expo workspace or mobile app source files.
 
@@ -92,9 +92,9 @@ For secure-launcher installs, the mobile Settings screen can trigger bridge main
 - Tap `Restart bridge safely` to stop the current bridge and relaunch it through `scripts/start-bridge-secure.js`
 - The app will disconnect briefly while the detached helper waits for bridge health to recover
 
-Published `clawdex-mobile` CLI installs also expose `Update bridge`.
+Published `squidex-mobile` CLI installs also expose `Update bridge`.
 
-- `Update bridge` stops the current bridge, runs `npm install -g clawdex-mobile@latest`, and starts the bridge again
+- `Update bridge` stops the current bridge, runs `npm install -g squidex-mobile@latest`, and starts the bridge again
 - If the upgrade step fails, the helper attempts to restart the previous bridge automatically
 
 Source checkouts expose only the restart action because repo-specific update logic is not safe to automate generically from mobile.
@@ -125,8 +125,8 @@ want the same flow but to open a native Expo run command instead of the default 
 
 Optional environment variables:
 
-- `CLAWDEX_SETUP_VERBOSE=true` — show full installer output
-- `CLAWDEX_BRIDGE_FORCE_SOURCE_BUILD=true` — ignore a bundled bridge binary and build from local Rust sources instead
+- `SQUIDEX_SETUP_VERBOSE=true` — show full installer output
+- `SQUIDEX_BRIDGE_FORCE_SOURCE_BUILD=true` — ignore a bundled bridge binary and build from local Rust sources instead
 - `EXPO_AUTO_REPAIR=true` — auto-repair React Native runtime on `npm run mobile`
 - `EXPO_CLEAR_CACHE=true` — force `expo start --clear` via `npm run mobile`
 
@@ -201,8 +201,8 @@ npm run teardown -- --yes
 | `BRIDGE_ACTIVE_ENGINE` | internal preferred routing backend used when multiple harnesses are enabled |
 | `BRIDGE_ENABLED_ENGINES` | selected harnesses to expose (`codex`, `opencode`, `cursor`, or a comma-separated mix) |
 | `OPENCODE_CLI_BIN` | opencode executable for dual-engine startup |
-| `CURSOR_APP_SERVER_BIN` | Cursor app-server executable, usually the `cursor-app-server` binary bundled with `clawdex-mobile` |
-| `CURSOR_API_KEY` | Cursor account API key used by the Cursor SDK harness; create it from Cursor Dashboard > Integrations > User API Keys, then provide it to `clawdex init` when Cursor is selected. See https://docs.cursor.com/en/cli/reference/authentication |
+| `CURSOR_APP_SERVER_BIN` | Cursor app-server executable, usually the `cursor-app-server` binary bundled with `squidex-mobile` |
+| `CURSOR_API_KEY` | Cursor account API key used by the Cursor SDK harness; create it from Cursor Dashboard > Integrations > User API Keys, then provide it to `squidex init` when Cursor is selected. See https://docs.cursor.com/en/cli/reference/authentication |
 | `CURSOR_MODEL` | optional Cursor model id for non-interactive host defaults; normal mobile chats send the selected model |
 | `BRIDGE_OPENCODE_HOST` | loopback host for spawned opencode server |
 | `BRIDGE_OPENCODE_PORT` | loopback port for spawned opencode server |

@@ -456,9 +456,9 @@ async function main() {
       writeStatus(args.statusPath, {
         ...baseStatus,
         state: "upgrading",
-        message: `Installing clawdex-mobile@${args.version}.`,
+        message: `Installing squidex-mobile@${args.version}.`,
       });
-      await runCommand(npmCommand(), ["install", "-g", `clawdex-mobile@${args.version}`], {
+      await runCommand(npmCommand(), ["install", "-g", `squidex-mobile@${args.version}`], {
         cwd: packageRoot,
         env: process.env,
       });

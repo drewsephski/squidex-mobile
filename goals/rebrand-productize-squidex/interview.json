@@ -1,0 +1,90 @@
+{
+  "stage": "interview",
+  "title": "Rebrand & Productize Squidex",
+  "goalSlug": "rebrand-productize-squidex",
+  "questions": [
+    {
+      "id": "github-repo",
+      "prompt": "Where should the Squidex GitHub repo live?",
+      "description": "Currently the origin remote points to Mohit-Patil/clawdex-mobile. You'll need your own repo to publish from. Should I fork it to your GitHub account (drewsepeczi/squidex-mobile)?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Fork to drewsepeczi/squidex-mobile",
+      "recommendedOptionIds": ["fork"],
+      "options": [
+        { "id": "fork", "label": "Fork to your account" },
+        { "id": "org", "label": "Publish under an org" },
+        { "id": "rename-origin", "label": "Rename existing origin" }
+      ],
+      "required": true
+    },
+    {
+      "id": "npm-publish",
+      "prompt": "How should the npm package be scoped/published?",
+      "description": "The root package name is 'squidex-mobile' with public access. It's currently unpublished. Under what npm username or scope should it be published?",
+      "answerMode": "text",
+      "recommendedAnswer": "Publish as 'squidex-mobile' under your npm account",
+      "required": true
+    },
+    {
+      "id": "mobile-distribution",
+      "prompt": "How are you distributing the mobile app?",
+      "description": "The mobile app currently ships via TestFlight (iOS) and direct APK (Android). There's also an EAS build setup. Do you want to keep these channels, change them, or start fresh?",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Keep TestFlight + APK for now; update branding before next submission",
+      "recommendedOptionIds": ["testflight", "apk", "eas"],
+      "options": [
+        { "id": "testflight", "label": "TestFlight (iOS)" },
+        { "id": "apk", "label": "Direct APK (Android)" },
+        { "id": "eas", "label": "EAS builds" },
+        { "id": "app-store", "label": "App Store / Play Store" }
+      ],
+      "required": true
+    },
+    {
+      "id": "domain-status",
+      "prompt": "What's the status of the website/domains?",
+      "description": "The code references getclawdex.com and getsquidex.com. The site/ directory has static HTML. Which domains are yours and what should we point to?",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Migrate site to getsquidex.com, deprecate getclawdex.com",
+      "recommendedOptionIds": ["migrate-squidex"],
+      "options": [
+        { "id": "keep-clawdex", "label": "Keep getclawdex.com as-is" },
+        { "id": "migrate-squidex", "label": "Migrate to getsquidex.com" },
+        { "id": "use-github-pages", "label": "Just use GitHub Pages" },
+        { "id": "not-my-domain", "label": "Neither domain is mine" }
+      ],
+      "required": true
+    },
+    {
+      "id": "priority-order",
+      "prompt": "What's the priority order for the rebrand work?",
+      "description": "There are ~55 files with stale 'clawdex' references plus external infra (repo rename, npm publish, domains). What order makes sense?",
+      "answerMode": "rank",
+      "recommendedAnswer": "1) Wire protocol strings (risk of breakage), 2) GitHub repo + npm, 3) File/asset rename, 4) Docs + site, 5) CI/CD cleanup",
+      "options": [
+        { "id": "wire-protocol", "label": "Wire protocol & storage keys" },
+        { "id": "repo-npm", "label": "GitHub repo + npm publish" },
+        { "id": "file-rename", "label": "File/code reference cleanup" },
+        { "id": "docs-site", "label": "Docs + website" },
+        { "id": "ci-cd", "label": "CI/CD workflow cleanup" },
+        { "id": "assets", "label": "Brand assets (icons, social)" }
+      ],
+      "required": true
+    },
+    {
+      "id": "what-to-skip",
+      "prompt": "Anything you want to defer or skip?",
+      "description": "Not everything needs to change. Storage keys like 'clawdex-app-settings.json' could stay as-is if you don't want to break existing user state. Docs can be cleaned up gradually. What's OK to leave for later?",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Change wire protocol and visible branding now; defer internal storage keys if backward compat matters",
+      "recommendedOptionIds": [],
+      "options": [
+        { "id": "internal-storage-keys", "label": "Defer internal storage key renames" },
+        { "id": "old-docs", "label": "Defer docs/plans/ cleanup" },
+        { "id": "wire-protocol-defer", "label": "Defer wire protocol renames (risky)" },
+        { "id": "nothing", "label": "Do it all now" }
+      ],
+      "required": true
+    }
+  ]
+}

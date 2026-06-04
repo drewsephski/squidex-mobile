@@ -1,5 +1,5 @@
 {
-  "name": "clawdex-mobile",
+  "name": "squidex-mobile",
   "version": "5.2.3",
   "description": "Private-network mobile bridge and CLI for Codex, OpenCode, and Cursor",
   "keywords": [
@@ -11,10 +11,10 @@
     "react-native"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/Mohit-Patil/clawdex-mobile#readme",
+  "homepage": "https://github.com/Mohit-Patil/squidex-mobile#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Mohit-Patil/clawdex-mobile.git"
+    "url": "git+https://github.com/Mohit-Patil/squidex-mobile.git"
   },
   "publishConfig": {
     "access": "public"
@@ -25,14 +25,14 @@
     "zod": "^3.25.0"
   },
   "bin": {
-    "clawdex": "bin/clawdex.js",
+    "squidex": "bin/squidex.js",
     "cursor-app-server": "services/cursor-app-server/dist/stdio.js"
   },
   "files": [
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
-    "bin/clawdex.js",
+    "bin/squidex.js",
     "docs/setup-and-operations.md",
     "docs/troubleshooting.md",
     "scripts/bridge-binary.js",
@@ -57,7 +57,7 @@
     "mobile": "./scripts/start-expo.sh mobile",
     "ios": "./scripts/start-expo.sh ios",
     "android": "./scripts/start-expo.sh android",
-    "desktop:mac": "swift run --package-path apps/macos ClawdexDesktop",
+    "desktop:mac": "swift run --package-path apps/macos SquidexDesktop",
     "desktop:mac:build": "swift build --package-path apps/macos",
     "desktop:mac:bundle": "./scripts/build-macos-desktop-app.sh",
     "desktop:mac:sign": "./scripts/sign-macos-desktop-app.sh",
@@ -74,11 +74,11 @@
     "secure:bridge:dev": "node ./scripts/start-bridge-secure.js --dev",
     "bridge:ts": "BRIDGE_WORKDIR=$(pwd) npm run -w @codex/mac-bridge dev",
     "version:sync": "node scripts/sync-versions.js",
-    "prepack": "npm run build -w @clawdex/cursor-app-server",
+    "prepack": "npm run build -w @squidex/cursor-app-server",
     "build": "npm run --workspaces build",
     "typecheck": "npm run --workspaces typecheck",
     "lint": "npm run --workspaces lint",
-    "test": "npm run test -w @codex/mac-bridge && npm run test -w apps/mobile && npm run test -w @codex/rust-bridge && npm run test -w @clawdex/cursor-app-server",
+    "test": "npm run test -w @codex/mac-bridge && npm run test -w apps/mobile && npm run test -w @codex/rust-bridge && npm run test -w @squidex/cursor-app-server",
     "teardown": "./scripts/teardown.sh"
   }
 }

@@ -7,7 +7,7 @@ This repo is a monorepo for controlling Codex from a phone.
 - Primary product path:
   - `apps/mobile`: Expo React Native client
   - `services/rust-bridge`: current backend bridge (`codex app-server` adapter + terminal/git/attachments/voice helpers)
-  - `bin/clawdex.js` + `scripts/*`: operator CLI and setup/runtime automation
+  - `bin/squidex.js` + `scripts/*`: operator CLI and setup/runtime automation
 - Legacy/reference path:
   - `services/mac-bridge`: older TypeScript bridge with useful tests/reference code, but not the primary runtime
 
@@ -108,8 +108,8 @@ Use the existing docs as the source of truth instead of duplicating them in code
 ### Preferred operator flow
 
 - Published CLI:
-  - `clawdex init`
-  - `clawdex stop`
+  - `squidex init`
+  - `squidex stop`
 - Monorepo equivalents:
   - `npm run setup:wizard`
   - `npm run stop:services`

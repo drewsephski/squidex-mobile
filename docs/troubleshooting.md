@@ -2,9 +2,9 @@
 
 ## Bridge startup seems slow
 
-- `clawdex init` no longer starts Expo for the shipped app.
+- `squidex init` no longer starts Expo for the shipped app.
 - Published npm installs should use a bundled bridge binary on `darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-x64`.
-- `clawdex init` should not run a repo `npm install` on the published CLI path.
+- `squidex init` should not run a repo `npm install` on the published CLI path.
 - Published CLI installs should not pull Expo/React Native or ship the mobile source tree.
 - If startup is still compiling Rust, you are usually on a source checkout, an unsupported host, or a package without bundled bridge binaries.
 - The slow parts are usually npm dependency install/repair or the first Rust bridge build on source-based setups.
@@ -22,7 +22,7 @@
 Preferred:
 
 ```bash
-clawdex stop
+squidex stop
 ```
 
 From repo checkout:
@@ -119,7 +119,7 @@ Also update Expo Go on your phone.
 
 - Ensure mobile app has file/photo permissions
 - File limit is `20 MB` per upload
-- Uploads persist under `BRIDGE_WORKDIR/.clawdex-mobile-attachments`
+- Uploads persist under `BRIDGE_WORKDIR/.squidex-mobile-attachments`
 - Ensure `BRIDGE_WORKDIR` is writable
 
 ## Worklets/Reanimated mismatch

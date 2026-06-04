@@ -113,7 +113,7 @@ describe('drawerChats', () => {
       }),
       chat('cwd-match', {
         title: 'Untitled',
-        cwd: '/Users/me/projects/clawdex-mobile',
+        cwd: '/Users/me/projects/squidex-mobile',
       }),
     ];
 
@@ -123,7 +123,7 @@ describe('drawerChats', () => {
     expect(searchDrawerChats(chats, 'delayed send').map((entry) => entry.id)).toEqual([
       'preview-match',
     ]);
-    expect(searchDrawerChats(chats, 'clawdex mobile').map((entry) => entry.id)).toEqual([
+    expect(searchDrawerChats(chats, 'squidex mobile').map((entry) => entry.id)).toEqual([
       'cwd-match',
     ]);
   });

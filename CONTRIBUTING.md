@@ -1,4 +1,4 @@
-# Contributing to Clawdex Mobile
+# Contributing to Squidex
 
 Thanks for contributing.
 
@@ -14,7 +14,7 @@ Primary paths:
 
 - `apps/mobile`: Expo React Native client
 - `services/rust-bridge`: active backend bridge
-- `bin/clawdex.js` and `scripts/*`: CLI and local automation
+- `bin/squidex.js` and `scripts/*`: CLI and local automation
 
 Reference/legacy path:
 

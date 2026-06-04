@@ -29,7 +29,7 @@ jest.mock('@expo/vector-icons', () => {
 describe('WorkspacePickerModal', () => {
   const theme = createAppTheme('dark');
   const oldSelectionPath =
-    '/Users/mohitpatil/Documents/github/serious-projects/clawdex-mobile';
+    '/Users/mohitpatil/Documents/github/serious-projects/squidex-mobile';
   const githubPath = '/Users/mohitpatil/Documents/github';
   const seriousProjectsPath = '/Users/mohitpatil/Documents/github/serious-projects';
 
@@ -64,7 +64,7 @@ describe('WorkspacePickerModal', () => {
           onSelectPath,
           currentPath: seriousProjectsPath,
           parentPath: githubPath,
-          entries: [directoryEntry('clawdex-mobile', oldSelectionPath)],
+          entries: [directoryEntry('squidex-mobile', oldSelectionPath)],
         })
       );
     });

@@ -61,7 +61,7 @@ const REQUEST_USER_INPUT_METHOD_ALT: &str = "tool/requestUserInput";
 const DYNAMIC_TOOL_CALL_METHOD: &str = "item/tool/call";
 const ACCOUNT_CHATGPT_TOKENS_REFRESH_METHOD: &str = "account/chatgptAuthTokens/refresh";
 const BRIDGE_CHATGPT_AUTH_CACHE_FILE_NAME: &str = "chatgpt-auth.json";
-const MOBILE_ATTACHMENTS_DIR: &str = ".clawdex-mobile-attachments";
+const MOBILE_ATTACHMENTS_DIR: &str = ".squidex-mobile-attachments";
 const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const DEFAULT_MAX_VOICE_TRANSCRIPTION_BYTES: usize = 100 * 1024 * 1024;
 const NOTIFICATION_REPLAY_BUFFER_SIZE: usize = 2_000;
@@ -85,10 +85,10 @@ const ROLLOUT_LIVE_SYNC_DEDUP_CAPACITY: usize = 8_192;
 const OPENCODE_HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENCODE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const OPENCODE_EVENT_RECONNECT_DELAY: Duration = Duration::from_secs(1);
-const BROWSER_PREVIEW_COOKIE_NAME: &str = "clawdex_preview";
-const BROWSER_PREVIEW_VIEWPORT_COOKIE_NAME: &str = "clawdex_preview_vp";
-const BROWSER_PREVIEW_PROXY_PREFIX: &str = "/__clawdex_proxy__";
-const BROWSER_PREVIEW_RUNTIME_SCRIPT_PATH: &str = "/__clawdex_preview_runtime__.js";
+const BROWSER_PREVIEW_COOKIE_NAME: &str = "squidex_preview";
+const BROWSER_PREVIEW_VIEWPORT_COOKIE_NAME: &str = "squidex_preview_vp";
+const BROWSER_PREVIEW_PROXY_PREFIX: &str = "/__squidex_proxy__";
+const BROWSER_PREVIEW_RUNTIME_SCRIPT_PATH: &str = "/__squidex_preview_runtime__.js";
 const BROWSER_PREVIEW_SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 12);
 const BROWSER_PREVIEW_MAX_SESSIONS: usize = 12;
 const BROWSER_PREVIEW_HTTP_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
@@ -97,7 +97,7 @@ const BROWSER_PREVIEW_DISCOVERY_HTTP_TIMEOUT: Duration = Duration::from_millis(5
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const GITHUB_API_URL: &str = "https://api.github.com";
 const GITHUB_HOST: &str = "github.com";
-const GITHUB_CREDENTIALS_DIR_NAME: &str = ".clawdex";
+const GITHUB_CREDENTIALS_DIR_NAME: &str = ".squidex";
 const GITHUB_CREDENTIALS_FILE_NAME: &str = "github-credentials";
 const GITHUB_GIT_CONFIG_FILE_NAME: &str = "github-git-auth.gitconfig";
 const CURSOR_API_BASE_URL: &str = "https://api.cursor.com";
@@ -378,7 +378,7 @@ async fn fetch_github_viewer(access_token: &str) -> Result<GitHubViewer, BridgeE
     }
 
     let http = HttpClient::builder()
-        .user_agent("clawdex-rust-bridge")
+        .user_agent("squidex-rust-bridge")
         .build()
         .map_err(|error| {
             BridgeError::server(&format!("failed to build GitHub auth client: {error}"))
@@ -673,7 +673,7 @@ async fn configure_git_credential_store(
 // content-free payload to the Expo push service when a turn completes or an
 // approval is requested. Expo relays to APNs/FCM, which wakes the app.
 
-const PUSH_REGISTRY_FILE_NAME: &str = ".clawdex-push-registry.json";
+const PUSH_REGISTRY_FILE_NAME: &str = ".squidex-push-registry.json";
 const EXPO_PUSH_SEND_ENDPOINT: &str = "https://exp.host/--/api/v2/push/send";
 const EXPO_PUSH_RECEIPTS_ENDPOINT: &str = "https://exp.host/--/api/v2/push/getReceipts";
 const EXPO_PUSH_BATCH_SIZE: usize = 100;
@@ -1408,7 +1408,7 @@ async fn resolve_cursor_runtime_credential() -> Result<CursorRuntimeCredential, 
     }
 
     Err(BridgeError::server(
-        "CURSOR_API_KEY is required for Cursor; run clawdex init with Cursor selected to save it in .env.secure",
+        "CURSOR_API_KEY is required for Cursor; run squidex init with Cursor selected to save it in .env.secure",
     ))
 }
 
@@ -3455,8 +3455,8 @@ impl AppServerBridge {
             "method": "initialize",
             "params": {
                 "clientInfo": {
-                    "name": "clawdex-mobile-rust-bridge",
-                    "title": "Clawdex Mobile Rust Bridge",
+                    "name": "squidex-rust-bridge",
+                    "title": "Squidex Rust Bridge",
                     "version": "0.1.0"
                 },
                 "capabilities": {
@@ -3978,7 +3978,7 @@ impl AppServerBridge {
                     "bridge/tool.call.unsupported",
                     json!({
                         "requestedAt": now_iso(),
-                        "message": "Dynamic tool calls are not supported by clawdex-mobile bridge",
+                        "message": "Dynamic tool calls are not supported by squidex-mobile bridge",
                         "request": params.clone().unwrap_or(Value::Null),
                     }),
                 )
@@ -3992,7 +3992,7 @@ impl AppServerBridge {
                         "contentItems": [
                             {
                                 "type": "inputText",
-                                "text": "Dynamic tool calls are not supported by clawdex-mobile bridge"
+                                "text": "Dynamic tool calls are not supported by squidex-mobile bridge"
                             }
                         ]
                     }
@@ -6169,7 +6169,7 @@ fn rollout_originator_allowed(originator: Option<&str>) -> bool {
     match originator {
         Some(value) => {
             let normalized = value.to_ascii_lowercase();
-            normalized.contains("codex") || normalized.contains("clawdex")
+            normalized.contains("codex") || normalized.contains("squidex") || normalized.contains("clawdex")
         }
         None => true,
     }
@@ -7432,7 +7432,7 @@ async fn main() {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "Clawdex".to_string());
+        .unwrap_or_else(|| "Squidex".to_string());
     let push = PushService::load(&config.workdir, project_label).await;
     push.spawn_event_loop(&hub);
 
@@ -9845,7 +9845,7 @@ fn build_pairing_payload(config: &BridgeConfig) -> Option<String> {
 
     Some(
         json!({
-            "type": "clawdex-bridge-pair",
+            "type": "squidex-bridge-pair",
             "bridgeUrl": bridge_url,
             "bridgeToken": bridge_token,
         })
@@ -9858,7 +9858,7 @@ fn build_token_only_pairing_payload(config: &BridgeConfig) -> Option<String> {
 
     Some(
         json!({
-            "type": "clawdex-bridge-token",
+            "type": "squidex-bridge-token",
             "bridgeToken": bridge_token,
         })
         .to_string(),
@@ -10058,7 +10058,7 @@ async fn resolve_preview_session_from_request(
         let Some(session) = preview.resolve_bootstrap(session_id, bootstrap_token).await else {
             return Err(preview_error_response(
                 StatusCode::UNAUTHORIZED,
-                "preview session is invalid or expired; reopen it from Clawdex",
+                "preview session is invalid or expired; reopen it from Squidex",
             ));
         };
 
@@ -10076,13 +10076,13 @@ async fn resolve_preview_session_from_request(
     let Some(cookie_token) = read_cookie_value(headers, BROWSER_PREVIEW_COOKIE_NAME) else {
         return Err(preview_error_response(
             StatusCode::UNAUTHORIZED,
-            "preview session is missing; reopen it from Clawdex",
+            "preview session is missing; reopen it from Squidex",
         ));
     };
     let Some(session) = preview.resolve_cookie(&cookie_token).await else {
         return Err(preview_error_response(
             StatusCode::UNAUTHORIZED,
-            "preview session expired; reopen it from Clawdex",
+            "preview session expired; reopen it from Squidex",
         ));
     };
 
@@ -10503,7 +10503,7 @@ fn preview_desktop_shell_response(
           }} catch (_error) {{}}
           syncHistory(rawUrl);
           var nextStateJson = JSON.stringify({{
-            type: 'clawdexDesktopFrameState',
+            type: 'squidexDesktopFrameState',
             shellRequestKey: {shell_request_key_json},
             rawUrl: rawUrl,
             title: title,
@@ -10612,8 +10612,8 @@ fn preview_desktop_shell_response(
             doc.fonts.ready.then(queueMeasureFrameHeight).catch(function() {{}});
           }}
 
-          if (!win.__clawdexDesktopFramePatched && win.history) {{
-            win.__clawdexDesktopFramePatched = true;
+          if (!win.__squidexDesktopFramePatched && win.history) {{
+            win.__squidexDesktopFramePatched = true;
             var originalPushState = typeof win.history.pushState === 'function' ? win.history.pushState.bind(win.history) : null;
             var originalReplaceState = typeof win.history.replaceState === 'function' ? win.history.replaceState.bind(win.history) : null;
             if (originalPushState) {{
@@ -10643,7 +10643,7 @@ fn preview_desktop_shell_response(
         }});
         window.addEventListener('resize', queueMeasureFrameHeight, {{ passive: true }});
 
-        window.__clawdexDesktopFrame = {{
+        window.__squidexDesktopFrame = {{
           goBack: function() {{
             var win = currentFrameWindow();
             if (win) {{
@@ -10833,7 +10833,7 @@ fn preview_overview_shell_response(
           }} catch (_error) {{}}
           syncHistory(rawUrl);
           var nextStateJson = JSON.stringify({{
-            type: 'clawdexDesktopFrameState',
+            type: 'squidexDesktopFrameState',
             shellRequestKey: {shell_request_key_json},
             rawUrl: rawUrl,
             title: title,
@@ -10970,8 +10970,8 @@ fn preview_overview_shell_response(
             doc.fonts.ready.then(queueMeasureFrameHeight).catch(function() {{}});
           }}
 
-          if (!win.__clawdexDesktopFramePatched && win.history) {{
-            win.__clawdexDesktopFramePatched = true;
+          if (!win.__squidexDesktopFramePatched && win.history) {{
+            win.__squidexDesktopFramePatched = true;
             var originalPushState = typeof win.history.pushState === 'function' ? win.history.pushState.bind(win.history) : null;
             var originalReplaceState = typeof win.history.replaceState === 'function' ? win.history.replaceState.bind(win.history) : null;
             if (originalPushState) {{
@@ -11000,7 +11000,7 @@ fn preview_overview_shell_response(
           setTimeout(queueMeasureFrameHeight, 400);
         }});
 
-        window.__clawdexDesktopFrame = {{
+        window.__squidexDesktopFrame = {{
           goBack: function() {{
             var win = currentFrameWindow();
             if (win) {{
@@ -11148,10 +11148,10 @@ fn inject_preview_head_markup(document: &str, markup: &str) -> String {
 fn build_preview_runtime_script() -> String {
     format!(
         r#"(function() {{
-  if (globalThis.__clawdexPreviewRuntimeInstalled) {{
+  if (globalThis.__squidexPreviewRuntimeInstalled) {{
     return;
   }}
-  globalThis.__clawdexPreviewRuntimeInstalled = true;
+  globalThis.__squidexPreviewRuntimeInstalled = true;
 
   var LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
   var PROXY_PREFIX = "{proxy_prefix}";
@@ -14621,7 +14621,7 @@ mod tests {
 
     #[tokio::test]
     async fn take_reply_preview_uses_last_nonempty_line() {
-        let dir = std::env::temp_dir().join(format!("clawdex-preview-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("squidex-preview-{}", std::process::id()));
         let _ = tokio::fs::create_dir_all(&dir).await;
         let service = PushService::load(&dir, "demo".to_string()).await;
         service
@@ -14639,7 +14639,7 @@ mod tests {
 
     #[tokio::test]
     async fn turn_completed_drains_reply_buffer_with_no_devices() {
-        let dir = std::env::temp_dir().join(format!("clawdex-drain-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("squidex-drain-{}", std::process::id()));
         let _ = tokio::fs::create_dir_all(&dir).await;
         let service = PushService::load(&dir, "demo".to_string()).await;
         // Stream a reply with no devices registered.
@@ -14701,7 +14701,7 @@ mod tests {
 
     #[tokio::test]
     async fn push_service_registers_dedupes_and_unregisters() {
-        let dir = std::env::temp_dir().join(format!("clawdex-push-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("squidex-push-test-{}", std::process::id()));
         let _ = tokio::fs::create_dir_all(&dir).await;
         let service = PushService::load(&dir, "demo".to_string()).await;
 
@@ -14765,7 +14765,7 @@ mod tests {
                 .expect("valid time")
                 .as_nanos();
             let temp_dir = env::temp_dir().join(format!(
-                "clawdex-bridge-chatgpt-auth-test-{}-{nonce}",
+                "squidex-bridge-chatgpt-auth-test-{}-{nonce}",
                 std::process::id()
             ));
             std::fs::create_dir_all(&temp_dir).expect("create auth cache test dir");
@@ -14939,7 +14939,7 @@ mod tests {
             config.preview_connect_url.clone(),
         ));
         let queue = BridgeQueueService::new(backend.clone(), hub.clone());
-        let push = PushService::load(&config.workdir, "Clawdex".to_string()).await;
+        let push = PushService::load(&config.workdir, "Squidex".to_string()).await;
 
         Arc::new(AppState {
             config,
@@ -15064,13 +15064,13 @@ mod tests {
             &location,
             &Url::parse("http://127.0.0.1:4000/").expect("valid upstream request"),
             Some("100.108.165.85:8788"),
-            Some("/__clawdex_proxy__/aGVsbG8"),
+            Some("/__squidex_proxy__/aGVsbG8"),
         )
         .expect("rewritten location");
 
         assert_eq!(
             rewritten.to_str().expect("header string"),
-            "http://100.108.165.85:8788/__clawdex_proxy__/aGVsbG8/auth/login?next=%2Fdash"
+            "http://100.108.165.85:8788/__squidex_proxy__/aGVsbG8/auth/login?next=%2Fdash"
         );
     }
 
@@ -15081,13 +15081,13 @@ mod tests {
             &location,
             &Url::parse("http://127.0.0.1:4000/api/session").expect("valid upstream request"),
             Some("100.108.165.85:8788"),
-            Some("/__clawdex_proxy__/aGVsbG8"),
+            Some("/__squidex_proxy__/aGVsbG8"),
         )
         .expect("rewritten location");
 
         assert_eq!(
             rewritten.to_str().expect("header string"),
-            "http://100.108.165.85:8788/__clawdex_proxy__/aGVsbG8/auth/login?next=%2Fdash#top"
+            "http://100.108.165.85:8788/__squidex_proxy__/aGVsbG8/auth/login?next=%2Fdash#top"
         );
     }
 
@@ -15098,13 +15098,13 @@ mod tests {
             &location,
             &Url::parse("http://127.0.0.1:4000/settings/profile").expect("valid upstream request"),
             Some("100.108.165.85:8788"),
-            Some("/__clawdex_proxy__/aGVsbG8"),
+            Some("/__squidex_proxy__/aGVsbG8"),
         )
         .expect("rewritten location");
 
         assert_eq!(
             rewritten.to_str().expect("header string"),
-            "http://100.108.165.85:8788/__clawdex_proxy__/aGVsbG8/settings/profile?tab=2"
+            "http://100.108.165.85:8788/__squidex_proxy__/aGVsbG8/settings/profile?tab=2"
         );
     }
 
@@ -15114,12 +15114,12 @@ mod tests {
             "session=abc123; Path=/; Domain=localhost; HttpOnly; SameSite=Lax",
         );
         let rewritten =
-            rewrite_preview_set_cookie_header(&cookie, Some("/__clawdex_proxy__/aGVsbG8"))
+            rewrite_preview_set_cookie_header(&cookie, Some("/__squidex_proxy__/aGVsbG8"))
                 .expect("rewritten cookie");
 
         assert_eq!(
             rewritten.to_str().expect("cookie string"),
-            "session=abc123; Path=/__clawdex_proxy__/aGVsbG8/; HttpOnly; SameSite=Lax"
+            "session=abc123; Path=/__squidex_proxy__/aGVsbG8/; HttpOnly; SameSite=Lax"
         );
     }
 
@@ -15325,7 +15325,7 @@ mod tests {
             .expect("system time")
             .as_nanos();
         let rollout_path = env::temp_dir().join(format!(
-            "clawdex-rollout-thread-media-{}-{}.jsonl",
+            "squidex-rollout-thread-media-{}-{}.jsonl",
             std::process::id(),
             unique
         ));
@@ -16442,10 +16442,10 @@ mod tests {
     }
 
     #[test]
-    fn rollout_originator_filter_allows_codex_and_clawdex_origins() {
+    fn rollout_originator_filter_allows_codex_squidex_and_clawdex_origins() {
         assert!(rollout_originator_allowed(Some("codex_cli_rs")));
         assert!(rollout_originator_allowed(Some(
-            "clawdex-mobile-rust-bridge"
+            "squidex-mobile-rust-bridge"
         )));
         assert!(!rollout_originator_allowed(Some("some_other_originator")));
     }
@@ -16783,7 +16783,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock after unix epoch")
             .as_nanos();
-        let missing = env::temp_dir().join(format!("clawdex-missing-{nonce}"));
+        let missing = env::temp_dir().join(format!("squidex-missing-{nonce}"));
         assert!(resolve_bridge_workdir(missing).is_err());
     }
 
@@ -16993,7 +16993,7 @@ mod tests {
         let payload = build_pairing_payload(&config).expect("pairing payload");
         let parsed: Value = serde_json::from_str(&payload).expect("valid json");
 
-        assert_eq!(parsed["type"], "clawdex-bridge-pair");
+        assert_eq!(parsed["type"], "squidex-bridge-pair");
         assert_eq!(parsed["bridgeUrl"], "http://127.0.0.1:8787");
         assert_eq!(parsed["bridgeToken"], "secret-token");
     }
@@ -17031,7 +17031,7 @@ mod tests {
         let fallback = build_token_only_pairing_payload(&config).expect("token-only payload");
         let parsed: Value = serde_json::from_str(&fallback).expect("valid json");
 
-        assert_eq!(parsed["type"], "clawdex-bridge-token");
+        assert_eq!(parsed["type"], "squidex-bridge-token");
         assert_eq!(parsed["bridgeToken"], "secret-token");
     }
 
@@ -17066,7 +17066,7 @@ mod tests {
         let payload = build_pairing_payload(&config).expect("pairing payload");
         let parsed: Value = serde_json::from_str(&payload).expect("valid json");
 
-        assert_eq!(parsed["type"], "clawdex-bridge-pair");
+        assert_eq!(parsed["type"], "squidex-bridge-pair");
         assert_eq!(parsed["bridgeUrl"], "https://octocat-8787.app.github.dev");
         assert_eq!(parsed["bridgeToken"], "secret-token");
     }
@@ -17271,7 +17271,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock after unix epoch")
             .as_nanos();
-        let capture_path = env::temp_dir().join(format!("clawdex-tool-call-capture-{nonce}.jsonl"));
+        let capture_path = env::temp_dir().join(format!("squidex-tool-call-capture-{nonce}.jsonl"));
         let shell_command = format!("cat > {}", capture_path.to_string_lossy());
 
         let mut child = Command::new("sh")
@@ -17330,7 +17330,7 @@ mod tests {
 
         assert!(captured.contains("\"id\":\"tool-call-1\""));
         assert!(captured.contains("\"success\":false"));
-        assert!(captured.contains("Dynamic tool calls are not supported by clawdex-mobile bridge"));
+        assert!(captured.contains("Dynamic tool calls are not supported by squidex-mobile bridge"));
     }
 
     #[tokio::test]

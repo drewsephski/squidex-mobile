@@ -7,7 +7,7 @@
 
 ## Goal
 
-Redesign the clawdex-mobile app to match the visual design and UX of the Codex desktop app:
+Redesign the squidex-mobile app to match the visual design and UX of the Codex desktop app:
 - Hidden left drawer for thread/nav navigation
 - Dark theme matching Codex desktop exactly
 - "Let's build" compose view when no thread is selected
@@ -95,7 +95,7 @@ Shown when app opens or "New thread" is tapped.
 │                          │
 │          🤖              │  agent icon (40px)
 │       Let's build        │  24px bold white
-│       clawdex-mobile ▾   │  16px muted, tappable
+│       squidex-mobile ▾   │  16px muted, tappable
 │                          │
 │  [ suggestion card ]     │  2 cards in a row
 │  [ suggestion card ]     │

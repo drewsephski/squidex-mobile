@@ -2,15 +2,15 @@ import AppKit
 import SwiftUI
 
 enum BrandAsset: String {
-    case clawdex = "mark"
+    case squidex = "mark"
     case codex = "engine-codex"
     case cursor = "engine-cursor"
     case opencode = "engine-opencode"
 
     var accessibilityLabel: String {
         switch self {
-        case .clawdex:
-            "Clawdex"
+        case .squidex:
+            "Squidex"
         case .codex:
             "Codex"
         case .cursor:
@@ -51,7 +51,7 @@ struct BrandIconView: View {
 
     private var tileColor: Color {
         switch asset {
-        case .clawdex, .cursor:
+        case .squidex, .cursor:
             Color.black.opacity(0.86)
         case .codex, .opencode:
             Color.white.opacity(0.96)
@@ -60,7 +60,7 @@ struct BrandIconView: View {
 
     private var strokeColor: Color {
         switch asset {
-        case .clawdex, .cursor:
+        case .squidex, .cursor:
             Color.white.opacity(0.18)
         case .codex, .opencode:
             Color.black.opacity(0.12)
@@ -82,7 +82,7 @@ private extension BrandAsset {
         var bundles: [Bundle] = []
         if
             let resourceURL = Bundle.main.resourceURL?
-                .appendingPathComponent("ClawdexDesktop_ClawdexDesktop.bundle"),
+                .appendingPathComponent("SquidexDesktop_SquidexDesktop.bundle"),
             let bundle = Bundle(url: resourceURL)
         {
             bundles.append(bundle)
@@ -93,7 +93,7 @@ private extension BrandAsset {
 
     var fallbackText: String {
         switch self {
-        case .clawdex, .codex:
+        case .squidex, .codex:
             "C"
         case .cursor:
             "Cu"

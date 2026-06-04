@@ -1,6 +1,6 @@
 # Push Notifications
 
-Clawdex can notify you on your phone when an agent turn finishes or when it needs
+Squidex can notify you on your phone when an agent turn finishes or when it needs
 an approval — even when the app is backgrounded or closed.
 
 ## Why the bridge sends them
@@ -18,7 +18,7 @@ codex app-server ──turn/completed──▶ bridge ──HTTPS POST──▶ 
 ```
 
 Waking a backgrounded/killed app is only possible through the OS push transports
-(APNs on iOS, FCM on Android). Clawdex reaches them via the **Expo Push
+(APNs on iOS, FCM on Android). Squidex reaches them via the **Expo Push
 Notification Service**, which the bridge calls with a minimal, content-free
 payload.
 
@@ -45,7 +45,7 @@ reply content.
   - `bridge/push/register` `{ token, platform, deviceName, events }`
   - `bridge/push/unregister` `{ token }`
   - `bridge/push/list` → device list (tokens are masked to a short suffix)
-- Registrations persist to `.clawdex-push-registry.json` in the bridge working
+- Registrations persist to `.squidex-push-registry.json` in the bridge working
   directory (gitignored).
 - A `PushService` subscribes to the bridge notification stream and, on
   `turn/completed` / `bridge/approval.requested`, POSTs to

@@ -16,14 +16,14 @@ describe('CursorSdkDriver', () => {
     expect(
       buildLocalCursorAgentOptions({
         cwd: '/workspace/launchkit',
-        storeCwd: '/workspace/clawdex-mobile',
+        storeCwd: '/workspace/squidex-mobile',
       })
     ).toEqual({
       local: {
         cwd: '/workspace/launchkit',
       },
       platform: {
-        workspaceRef: '/workspace/clawdex-mobile',
+        workspaceRef: '/workspace/squidex-mobile',
       },
     });
   });

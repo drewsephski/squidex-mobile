@@ -69,14 +69,14 @@ function syncVersions() {
   appConfig.expo.version = version;
   writeJson(appJsonPath, appConfig);
 
-  updateTextFile('apps/mobile/ios/ClawdexMobile/Info.plist', version, (current) =>
+  updateTextFile('apps/mobile/ios/SquidexMobile/Info.plist', version, (current) =>
     current.replace(
       /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<]+)(<\/string>)/,
       `$1${version}$3`
     )
   );
 
-  updateTextFile('apps/mobile/ios/ClawdexMobile.xcodeproj/project.pbxproj', version, (current) =>
+  updateTextFile('apps/mobile/ios/SquidexMobile.xcodeproj/project.pbxproj', version, (current) =>
     current.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`)
   );
 

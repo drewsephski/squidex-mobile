@@ -227,14 +227,14 @@ describe('chatMapping', () => {
                 result: {
                   status: 'success',
                   value: {
-                    content: '{ "name": "clawdex-mobile" }',
+                    content: '{ "name": "squidex-mobile" }',
                   },
                 },
               },
               {
                 type: 'agentMessage',
                 id: 'a1',
-                text: 'The package is clawdex-mobile.',
+                text: 'The package is squidex-mobile.',
               },
             ],
           },
@@ -247,7 +247,7 @@ describe('chatMapping', () => {
     expect(systemMessages[0].systemKind).toBe('tool');
     expect(systemMessages[0].content).toContain('• Called tool `read`');
     expect(systemMessages[0].content).toContain('Input: /repo/package.json');
-    expect(systemMessages[0].content).toContain('clawdex-mobile');
+    expect(systemMessages[0].content).toContain('squidex-mobile');
   });
 
   it('maps Codex function call items into visible tool timeline entries', () => {

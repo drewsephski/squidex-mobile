@@ -28,7 +28,7 @@ function resolvePackageDir() {
 
 function resolveWorkspaceDir() {
   const candidates = [
-    process.env.CLAWDEX_WORKSPACE_ROOT,
+    process.env.SQUIDEX_WORKSPACE_ROOT,
     process.env.INIT_CWD,
     process.cwd(),
   ];
@@ -129,7 +129,7 @@ function normalizeBaseUrl(rawUrl) {
 }
 
 function resolveBridgeBuildProfile(env) {
-  const explicitProfile = readNonEmptyEnv(env, "CLAWDEX_BRIDGE_BUILD_PROFILE").toLowerCase();
+  const explicitProfile = readNonEmptyEnv(env, "SQUIDEX_BRIDGE_BUILD_PROFILE").toLowerCase();
   if (explicitProfile === "debug" || explicitProfile === "release") {
     return explicitProfile;
   }
@@ -163,7 +163,7 @@ function buildPairingPayload(env, endpoint) {
   }
 
   return JSON.stringify({
-    type: "clawdex-bridge-pair",
+    type: "squidex-bridge-pair",
     bridgeUrl,
     bridgeToken: token,
   });
@@ -176,7 +176,7 @@ function buildTokenOnlyPairingPayload(env) {
   }
 
   return JSON.stringify({
-    type: "clawdex-bridge-token",
+    type: "squidex-bridge-token",
     bridgeToken: token,
   });
 }
@@ -456,7 +456,7 @@ async function spawnDetachedAndWait(command, args, options) {
 
   if (await probeHealth(healthUrl)) {
     console.error(
-      `error: another bridge is already responding at http://${formatHostForUrl(host)}:${port}. Stop it first with 'clawdex stop'.`
+      `error: another bridge is already responding at http://${formatHostForUrl(host)}:${port}. Stop it first with 'squidex stop'.`
     );
     process.exit(1);
   }
@@ -543,10 +543,10 @@ function resolveLaunch(workspaceDir, packageDir, env, { devMode, forceSourceBuil
     };
   }
 
-  const overrideBinary = env.CLAWDEX_BRIDGE_BINARY ? path.resolve(env.CLAWDEX_BRIDGE_BINARY) : "";
+  const overrideBinary = env.SQUIDEX_BRIDGE_BINARY ? path.resolve(env.SQUIDEX_BRIDGE_BINARY) : "";
   if (overrideBinary) {
     if (!fs.existsSync(overrideBinary)) {
-      console.error(`error: CLAWDEX_BRIDGE_BINARY not found at ${overrideBinary}`);
+      console.error(`error: SQUIDEX_BRIDGE_BINARY not found at ${overrideBinary}`);
       process.exit(1);
     }
     ensureExecutable(overrideBinary);
@@ -576,12 +576,12 @@ function resolveLaunch(workspaceDir, packageDir, env, { devMode, forceSourceBuil
 
   if (!forceSourceBuild) {
     console.error("error: no packaged bridge binary was found for this host.");
-    console.error("Reinstall a published clawdex-mobile package with bundled bridge binaries.");
+    console.error("Reinstall a published squidex-mobile package with bundled bridge binaries.");
     process.exit(1);
   }
 
   if (!commandExists("cargo")) {
-    console.error("error: CLAWDEX_BRIDGE_FORCE_SOURCE_BUILD=true was set, but cargo is not installed.");
+    console.error("error: SQUIDEX_BRIDGE_FORCE_SOURCE_BUILD=true was set, but cargo is not installed.");
     process.exit(1);
   }
 
@@ -621,7 +621,7 @@ async function start() {
   const env = {
     ...process.env,
     ...fileEnv,
-    CLAWDEX_WORKSPACE_ROOT: workspaceDir,
+    SQUIDEX_WORKSPACE_ROOT: workspaceDir,
     INIT_CWD: process.env.INIT_CWD || workspaceDir,
   };
   const devMode = process.argv.includes("--dev") || env.BRIDGE_RUN_MODE === "dev";
@@ -630,7 +630,7 @@ async function start() {
   }
   const backgroundMode = process.argv.includes("--background");
   const prepareOnly = process.argv.includes("--prepare-only");
-  const forceSourceBuild = env.CLAWDEX_BRIDGE_FORCE_SOURCE_BUILD === "true";
+  const forceSourceBuild = env.SQUIDEX_BRIDGE_FORCE_SOURCE_BUILD === "true";
   const launch = resolveLaunch(workspaceDir, packageDir, env, { devMode, forceSourceBuild });
 
   if (prepareOnly) {

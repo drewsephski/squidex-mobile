@@ -37,7 +37,7 @@ final class BridgeController: ObservableObject {
 
     var pairingPayload: String {
         let payload: [String: Any] = [
-            "type": "clawdex-bridge-pair",
+            "type": "squidex-bridge-pair",
             "bridgeUrl": configuration.bridgeURL,
             "bridgeToken": configuration.token,
             "defaultChatEngine": configuration.activeEngine,

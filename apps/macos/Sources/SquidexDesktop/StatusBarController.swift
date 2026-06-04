@@ -20,7 +20,7 @@ final class StatusBarController: NSObject {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover(_:))
-        statusItem.button?.toolTip = "Clawdex"
+        statusItem.button?.toolTip = "Squidex"
         self.statusItem = statusItem
 
         let popover = NSPopover()
@@ -39,7 +39,7 @@ final class StatusBarController: NSObject {
             return
         }
 
-        button.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: "Clawdex")
+        button.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: "Squidex")
         button.imagePosition = .imageOnly
     }
 

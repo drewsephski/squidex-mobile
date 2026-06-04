@@ -11,7 +11,7 @@ struct MenuBarPanel: View {
                     .font(.title2)
                     .foregroundStyle(statusColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Clawdex")
+                    Text("Squidex")
                         .font(.headline)
                     Text(controller.runState.title)
                         .font(.caption)
@@ -71,7 +71,7 @@ struct MenuBarPanel: View {
 
             Divider()
 
-            Button("Quit Clawdex") {
+            Button("Quit Squidex") {
                 controller.stop()
                 NSApplication.shared.terminate(nil)
             }
