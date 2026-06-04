@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Download Squidex — Android APK, iOS, CLI</title>
+    <meta
+      name="description"
+      content="Download Squidex — Android APK, iOS build guide, and CLI bridge install for Codex, OpenCode, and Cursor."
+    />
+    <meta name="theme-color" content="#0B0C0E" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Download Squidex" />
+    <meta property="og:description" content="Download Squidex for Android, iOS, or install the CLI bridge." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://squidex.app/download/" />
+    <meta property="og:image" content="https://squidex.app/images/mark.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/favicon.png" />
+    <link rel="apple-touch-icon" href="/images/favicon.png" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/styles.css" />
+
+    <style>
+      .download-hero {
+        padding: 120px 0 60px;
+        text-align: center;
+      }
+      .download-hero h1 {
+        font-size: clamp(2.2rem, 5vw, 3.6rem);
+        margin-bottom: 16px;
+      }
+      .download-hero p {
+        max-width: 520px;
+        margin: 0 auto;
+      }
+
+      .download-options {
+        display: grid;
+        gap: 24px;
+        max-width: 720px;
+        margin: 0 auto;
+        padding-bottom: 80px;
+      }
+      .download-card {
+        border: 1px solid rgba(255, 245, 235, 0.08);
+        border-radius: 20px;
+        padding: 32px;
+        background: var(--surface);
+        transition: border-color 0.3s, box-shadow 0.3s;
+      }
+      .download-card:hover {
+        border-color: rgba(232, 173, 85, 0.25);
+        box-shadow: 0 0 30px rgba(232, 173, 85, 0.06);
+      }
+      .download-card-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .download-card-header svg {
+        width: 32px;
+        height: 32px;
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+      .download-card-header h3 {
+        font-size: 1.25rem;
+        margin: 0;
+      }
+      .download-card p {
+        margin: 0 0 16px;
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        line-height: 1.7;
+      }
+      .download-card .btn {
+        margin-top: 4px;
+      }
+      .platform-tag {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin-left: auto;
+      }
+      .platform-tag.android {
+        background: rgba(232, 173, 85, 0.12);
+        color: var(--accent);
+      }
+      .platform-tag.ios {
+        background: rgba(180, 200, 255, 0.12);
+        color: #8ab4ff;
+      }
+      .platform-tag.cli {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-secondary);
+      }
+
+      .code-block {
+        display: block;
+        background: rgba(0,0,0,0.3);
+        border: 1px solid rgba(255, 245, 235, 0.06);
+        border-radius: 10px;
+        padding: 14px 18px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+        color: var(--text);
+        margin: 12px 0 0;
+        overflow-x: auto;
+        user-select: all;
+        cursor: copy;
+      }
+      .code-block:hover {
+        border-color: rgba(232, 173, 85, 0.2);
+      }
+      .code-block.copied::after {
+        content: 'Copied!';
+        float: right;
+        font-size: 0.75rem;
+        color: var(--accent);
+        font-family: 'Sora', sans-serif;
+      }
+
+      .build-steps {
+        list-style: none;
+        padding: 0;
+        margin: 16px 0 0;
+        counter-reset: step;
+      }
+      .build-steps li {
+        counter-increment: step;
+        padding: 3px 0;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.7;
+      }
+      .build-steps li::before {
+        content: counter(step) ".";
+        color: var(--accent);
+        font-weight: 600;
+        margin-right: 8px;
+        font-family: 'Syne', sans-serif;
+      }
+      .build-steps li code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        background: rgba(255,255,255,0.04);
+        padding: 1px 6px;
+        border-radius: 4px;
+        color: var(--text);
+      }
+
+      .prereq-box {
+        margin-top: 12px;
+        padding: 14px 18px;
+        background: rgba(232, 173, 85, 0.06);
+        border: 1px solid rgba(232, 173, 85, 0.12);
+        border-radius: 10px;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+      .prereq-box strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .coming-soon {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+      .coming-soon-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        background: rgba(255,255,255,0.06);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-left: 8px;
+      }
+
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+      .back-link:hover {
+        color: var(--text);
+      }
+      .back-link svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      @media (max-width: 640px) {
+        .download-hero {
+          padding: 100px 0 40px;
+        }
+        .download-card {
+          padding: 24px;
+        }
+        .download-card-header {
+          flex-wrap: wrap;
+        }
+        .platform-tag {
+          margin-left: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Noise Overlay -->
+    <svg class="noise-overlay" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true">
+      <filter id="noiseFilter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
+        <feColorMatrix type="saturate" values="0" />
+      </filter>
+      <rect width="100%" height="100%" filter="url(#noiseFilter)" opacity="0.035" />
+    </svg>
+
+    <!-- Navigation -->
+    <nav class="site-nav" role="navigation" aria-label="Primary">
+      <div class="container">
+        <a href="/" class="nav-logo" aria-label="Squidex home">
+          <img src="/images/mark.png" alt="" width="28" height="28" />
+          <span>Squidex</span>
+        </a>
+        <div class="nav-links" id="nav-links">
+          <a href="/download/" aria-current="page">Download</a>
+          <a href="/support/">Support</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="https://github.com/drewsephski/squidex-mobile" class="btn btn-accent nav-cta">GitHub</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="download-hero">
+      <div class="content-slim">
+        <div class="hero-badge" style="margin: 0 auto 20px;">v1.0 &middot; Open source</div>
+        <h1>Get Squidex</h1>
+        <p class="text-secondary">Choose your platform. The bridge CLI connects everything together.</p>
+      </div>
+    </section>
+
+    <!-- Download Options -->
+    <section class="download-options content-slim">
+      <!-- Android APK -->
+      <article class="download-card">
+        <div class="download-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+            <line x1="8" y1="6" x2="16" y2="6" />
+            <line x1="12" y1="10" x2="12" y2="14" />
+            <line x1="10" y1="12" x2="14" y2="12" />
+          </svg>
+          <h3>Android APK</h3>
+          <span class="platform-tag android">Android</span>
+        </div>
+        <p>Install directly on any Android device. No Play Store required — just download and sideload.</p>
+        <a href="/download/squidex.apk" class="btn btn-accent" download>
+          Download APK
+        </a>
+        <span class="coming-soon-badge">Coming soon</span>
+        <p style="margin-top: 12px; font-size: 0.85rem;">
+          In the meantime, build it yourself in one command:
+        </p>
+        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">git clone https://github.com/drewsephski/squidex-mobile.git
+cd squidex-mobile
+npm install
+npx expo build:android --type apk</span>
+      </article>
+
+      <!-- iOS -->
+      <article class="download-card">
+        <div class="download-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+            <line x1="12" y1="18" x2="12" y2="18" />
+          </svg>
+          <h3>iOS</h3>
+          <span class="platform-tag ios">iOS</span>
+        </div>
+        <p>Build and run on your iPhone using Xcode and a free Apple ID. No paid Developer account needed for device testing.</p>
+        <h4 style="margin: 16px 0 8px; font-size: 0.95rem; color: var(--text);">Prerequisites</h4>
+        <div class="prereq-box">
+          <strong>macOS</strong> with Xcode 16+ installed.<br />
+          A <strong>free Apple ID</strong> (no Developer Program membership required).
+        </div>
+        <h4 style="margin: 16px 0 8px; font-size: 0.95rem; color: var(--text);">Build steps</h4>
+        <ol class="build-steps">
+          <li><code>git clone https://github.com/drewsephski/squidex-mobile.git</code></li>
+          <li><code>cd squidex-mobile && npm install</code></li>
+          <li><code>npx expo run:ios</code></li>
+          <li>In Xcode, set your team to your free Apple ID (signing &amp; capabilities)</li>
+          <li>Build to your connected iPhone (7-day certificate)</li>
+        </ol>
+        <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);">
+          TestFlight and App Store distribution require an Apple Developer Program membership ($99/year).
+        </p>
+      </article>
+
+      <!-- CLI Bridge -->
+      <article class="download-card">
+        <div class="download-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          <h3>CLI Bridge</h3>
+          <span class="platform-tag cli">macOS / Linux / Windows</span>
+        </div>
+        <p>The bridge is the server-side component that runs on your development machine. Install it globally with npm.</p>
+        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">npm install -g squidex-mobile@latest</span>
+        <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-secondary);">Then start the bridge:</p>
+        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">squidex init</span>
+        <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);">
+          Requires Node.js 20+, and <code>codex</code>, <code>opencode</code>, or <code>cursor-app-server</code> in your PATH.
+        </p>
+      </article>
+
+      <!-- GitHub -->
+      <article class="download-card">
+        <div class="download-card-header">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+          </svg>
+          <h3>Source code</h3>
+          <span class="platform-tag cli">GitHub</span>
+        </div>
+        <p>Browse the source, open issues, or contribute on GitHub. MIT licensed.</p>
+        <a href="https://github.com/drewsephski/squidex-mobile" class="btn btn-outline">
+          View on GitHub
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: 6px;">
+            <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+          </svg>
+        </a>
+      </article>
+
+      <p class="text-secondary" style="text-align: center; font-size: 0.85rem; margin-top: 8px;">
+        <a href="/" class="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          Back to home
+        </a>
+      </p>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer" role="contentinfo">
+      <div class="container">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <img src="/images/mark.png" alt="" width="20" height="20" />
+            <span>&copy; 2026 Squidex</span>
+          </div>
+          <nav class="footer-links" aria-label="Footer">
+            <a href="/download/">Download</a>
+            <a href="/support/">Support</a>
+            <a href="/privacy/">Privacy</a>
+            <a href="/terms/">Terms</a>
+            <a href="https://github.com/drewsephski/squidex-mobile">GitHub</a>
+          </nav>
+          <span class="footer-copy">Built for developers who code anywhere.</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+      (function() {
+        'use strict';
+
+        // Mobile nav toggle
+        var toggle = document.getElementById('nav-toggle');
+        var links = document.getElementById('nav-links');
+        if (toggle && links) {
+          toggle.addEventListener('click', function() {
+            var isOpen = links.classList.toggle('open');
+            toggle.classList.toggle('active');
+            toggle.setAttribute('aria-expanded', isOpen);
+          });
+          links.querySelectorAll('a').forEach(function(link) {
+            link.addEventListener('click', function() {
+              links.classList.remove('open');
+              toggle.classList.remove('active');
+              toggle.setAttribute('aria-expanded', 'false');
+            });
+          });
+          document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && links.classList.contains('open')) {
+              links.classList.remove('open');
+              toggle.classList.remove('active');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+        }
+
+        // Copy-to-clipboard for code blocks
+        window.copyCode = function(el) {
+          var text = el.textContent.trim();
+          navigator.clipboard.writeText(text).then(function() {
+            el.classList.add('copied');
+            setTimeout(function() { el.classList.remove('copied'); }, 2000);
+          }).catch(function() {});
+        };
+      })();
+    </script>
+  </body>
+</html>
