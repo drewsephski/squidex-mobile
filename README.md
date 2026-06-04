@@ -29,7 +29,7 @@ Before you start:
 
 Install the mobile app:
 
-- Android APK: <https://www.getsquidex.com/android-beta/>
+- Android APK: <https://squidex.app/android-beta/>
 - iOS: <https://apple.co/4rNAHRF>
 
 Install the CLI and start the bridge:

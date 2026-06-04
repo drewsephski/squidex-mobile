@@ -60,7 +60,7 @@ type OnboardingStep = 'intro' | 'connect';
 type PairingPayload = { bridgeToken: string; bridgeUrl?: string };
 
 const BRIDGE_SETUP_COMMANDS = 'npm install -g squidex-mobile@latest\nsquidex init';
-const SQUIDEX_BRIDGE_SETUP_URL = 'https://getsquidex.com/bridge-setup/';
+const SQUIDEX_BRIDGE_SETUP_URL = 'https://squidex.app/bridge-setup/';
 const SETUP_STAGES = [
   {
     title: 'Start',
