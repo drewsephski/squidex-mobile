@@ -13,6 +13,9 @@ yarn-error.log*
 **/target/
 **/.build/
 
+# Firebase (per-device config, regenerate per build profile)
+apps/mobile/google-services.json
+
 # Expo / React Native
 .expo/
 .expo-shared/
