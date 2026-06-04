@@ -1,3 +1,15 @@
 {
-  "framework": null
+  "framework": null,
+  "redirects": [
+    {
+      "source": "/download/squidex.apk",
+      "destination": "https://github.com/drewsephski/squidex-mobile/releases/latest/download/squidex.apk",
+      "permanent": false
+    },
+    {
+      "source": "/android-beta/",
+      "destination": "/download/",
+      "permanent": true
+    }
+  ]
 }

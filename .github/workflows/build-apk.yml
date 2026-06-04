@@ -9,24 +9,19 @@ on:
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
-    inputs:
-      version_name:
-        description: "Version name for this build"
-        required: false
-        default: ""
 
 concurrency:
   group: build-apk-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
-    name: Build APK
+    name: Build APK and publish release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -39,33 +34,51 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Setup Expo
-        uses: expo/expo-github-action@v8
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          distribution: temurin
+          java-version: "17"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Android APK
-        run: |
-          cd apps/mobile
-          npx expo build:android --type apk --output-dir ../../dist
+      - name: Prebuild native Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease
 
       - name: Rename APK
         run: |
-          VERSION="${{ github.event.inputs.version_name }}"
-          if [ -z "$VERSION" ]; then
-            VERSION=$(node -p "require('./package.json').version")
-          fi
+          VERSION=$(node -p "require('./package.json').version")
           SHA=$(git rev-parse --short HEAD)
-          mv dist/*.apk "dist/squidex-${VERSION}-${SHA}.apk" 2>/dev/null || true
+          mkdir -p dist
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dist/squidex.apk"
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dist/squidex-${VERSION}-${SHA}.apk"
 
-      - name: Upload APK artifact
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: squidex-apk
           path: dist/*.apk
-          retention-days: 30
+          retention-days: 90
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SHA=$(git rev-parse --short HEAD)
+
+          # Delete existing "latest" release if it exists
+          gh release delete latest --yes 2>/dev/null || true
+
+          # Create new "latest" release
+          gh release create latest \
+            --title "Latest build ($VERSION - $SHA)" \
+            --notes "Automated APK build from commit ${{ github.sha }}." \
+            --latest \
+            dist/squidex.apk
