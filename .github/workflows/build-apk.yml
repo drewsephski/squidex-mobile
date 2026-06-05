@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "apps/mobile/**"
+      - "scripts/**"
+      - ".github/workflows/build-apk.yml"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
@@ -21,7 +23,7 @@ jobs:
   build:
     name: Build APK and publish release
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -40,6 +42,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: npm ci
 
@@ -47,47 +52,67 @@ jobs:
         working-directory: apps/mobile
         run: npx expo prebuild --platform android --clean
 
-      - name: Generate keystore and signing config
+      - name: Generate release keystore
         run: |
           mkdir -p apps/mobile/android/keystores
-
-          # Generate a release keystore for CI signing
           keytool -genkey -v -keystore apps/mobile/android/keystores/release.keystore \
             -alias release \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass squidexci -keypass squidexci \
             -dname "CN=Squidex, OU=CI, O=Squidex, L=Unknown, ST=Unknown, C=US"
 
-          # Create credentials.json for the eas-build.gradle signing config
-          cat > apps/mobile/credentials.json << 'EOF'
-          {
-            "android": {
-              "keystore": {
-                "keystorePath": "android/keystores/release.keystore",
-                "keystorePassword": "squidexci",
-                "keyAlias": "release",
-                "keyPassword": "squidexci"
-              }
-            }
-          }
-          EOF
-
-      - name: Build signed APK
+      - name: Build unsigned APK
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease
 
-      - name: Verify APK is signed
+      - name: Sign APK with apksigner
         run: |
-          echo "=== APK signature verification ==="
-          apksigner verify --verbose apps/mobile/android/app/build/outputs/apk/release/app-release.apk 2>&1 || echo "WARNING: APK may not be properly signed"
+          APK=apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          SIGNED=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+
+          # If Gradle already produced app-release.apk, use that; otherwise use -unsigned
+          if [ ! -f "$APK" ]; then
+            APK="$SIGNED"
+          fi
+
+          echo "Signing: $APK"
+          ls -la "$APK"
+
+          # Find apksigner in the Android SDK
+          APKSIGNER=$(find /usr/local/lib/android/sdk/build-tools -name apksigner -type f 2>/dev/null | head -1)
+          if [ -z "$APKSIGNER" ]; then
+            # Try ANDROID_HOME
+            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner -type f 2>/dev/null | head -1)
+          fi
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner not found!"
+            ls /usr/local/lib/android/sdk/build-tools/ 2>/dev/null || echo "No build-tools"
+            exit 1
+          fi
+          echo "Found apksigner: $APKSIGNER"
+
+          # Sign the APK
+          "$APKSIGNER" sign \
+            --ks apps/mobile/android/keystores/release.keystore \
+            --ks-pass pass:squidexci \
+            --ks-key-alias release \
+            --key-pass pass:squidexci \
+            --out "$SIGNED" \
+            "$APK"
+
+          # Verify the signature
+          echo "=== Signature verification ==="
+          "$APKSIGNER" verify --verbose "$SIGNED" 2>&1
 
       - name: Rename APK
         run: |
           VERSION=$(node -p "require('./package.json').version")
           SHA=$(git rev-parse --short HEAD)
           mkdir -p dist
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dist/squidex.apk"
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "dist/squidex-${VERSION}-${SHA}.apk"
+          APK=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          cp "$APK" "dist/squidex.apk"
+          cp "$APK" "dist/squidex-${VERSION}-${SHA}.apk"
+          echo "APK size: $(ls -lh dist/squidex.apk | awk '{print $5}')"
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
@@ -103,10 +128,8 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           SHA=$(git rev-parse --short HEAD)
 
-          # Delete existing "latest" release if it exists
           gh release delete latest --yes 2>/dev/null || true
 
-          # Create new "latest" release
           gh release create latest \
             --title "Latest build ($VERSION - $SHA)" \
             --notes "Automated APK build from commit ${{ github.sha }}." \
