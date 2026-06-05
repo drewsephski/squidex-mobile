@@ -42,7 +42,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
@@ -52,57 +52,67 @@ jobs:
         working-directory: apps/mobile
         run: npx expo prebuild --platform android --clean
 
-      - name: Generate release keystore
+      - name: Generate keystore and signing config
         run: |
+          # Create keystore directory
           mkdir -p apps/mobile/android/keystores
+
+          # Generate a release keystore used for signing
           keytool -genkey -v -keystore apps/mobile/android/keystores/release.keystore \
             -alias release \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass squidexci -keypass squidexci \
             -dname "CN=Squidex, OU=CI, O=Squidex, L=Unknown, ST=Unknown, C=US"
 
-      - name: Build unsigned APK
+          # Create credentials.json for the eas-build.gradle signing hook
+          # (expo prebuild generates a gradle file that reads this)
+          cat > apps/mobile/credentials.json << 'EOF'
+          {
+            "android": {
+              "keystore": {
+                "keystorePath": "android/keystores/release.keystore",
+                "keystorePassword": "squidexci",
+                "keyAlias": "release",
+                "keyPassword": "squidexci"
+              }
+            }
+          }
+          EOF
+
+      - name: Build APK with Gradle
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease
 
-      - name: Sign APK with apksigner
+      - name: Sign and verify APK
         run: |
-          APK=apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          SIGNED=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          KEYSTORE=apps/mobile/android/keystores/release.keystore
+          INPUT_APK=apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          OUTPUT_APK=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
 
-          # If Gradle already produced app-release.apk, use that; otherwise use -unsigned
-          if [ ! -f "$APK" ]; then
-            APK="$SIGNED"
+          # Gradle may produce -unsigned or signed depending on build config
+          if [ ! -f "$INPUT_APK" ]; then
+            INPUT_APK="$OUTPUT_APK"
           fi
 
-          echo "Signing: $APK"
-          ls -la "$APK"
+          echo "Input APK: $INPUT_APK"
+          ls -la "$INPUT_APK"
 
-          # Find apksigner in the Android SDK
+          # Locate apksigner in Android SDK
           APKSIGNER=$(find /usr/local/lib/android/sdk/build-tools -name apksigner -type f 2>/dev/null | head -1)
-          if [ -z "$APKSIGNER" ]; then
-            # Try ANDROID_HOME
-            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner -type f 2>/dev/null | head -1)
-          fi
-          if [ -z "$APKSIGNER" ]; then
-            echo "ERROR: apksigner not found!"
-            ls /usr/local/lib/android/sdk/build-tools/ 2>/dev/null || echo "No build-tools"
-            exit 1
-          fi
-          echo "Found apksigner: $APKSIGNER"
+          echo "apksigner: $APKSIGNER"
 
           # Sign the APK
           "$APKSIGNER" sign \
-            --ks apps/mobile/android/keystores/release.keystore \
+            --ks "$KEYSTORE" \
             --ks-pass pass:squidexci \
             --ks-key-alias release \
             --key-pass pass:squidexci \
-            --out "$SIGNED" \
-            "$APK"
+            --out "$OUTPUT_APK" \
+            "$INPUT_APK"
 
-          # Verify the signature
-          echo "=== Signature verification ==="
-          "$APKSIGNER" verify --verbose "$SIGNED" 2>&1
+          # Verify signature
+          echo "=== SIGNATURE VERIFICATION ==="
+          "$APKSIGNER" verify --verbose "$OUTPUT_APK" 2>&1
 
       - name: Rename APK
         run: |
