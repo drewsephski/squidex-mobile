@@ -244,9 +244,9 @@ p + p { margin-top: 1em; }
 }
 
 .nav-logo img {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
 }
 
 .nav-links {
@@ -1107,6 +1107,8 @@ p + p { margin-top: 1em; }
 .cta-title {
   font-size: clamp(2rem, 4vw, 3rem);
   max-width: 600px;
+  line-height: 1.2;
+  padding-bottom: 4px;
 }
 
 .cta-subtitle {
