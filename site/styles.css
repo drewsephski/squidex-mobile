@@ -271,11 +271,11 @@ p + p { margin-top: 1em; }
 
 .nav-links .nav-cta {
   margin-left: 12px;
-  color: #ffffff;
+  color: #0B0C0E;
 }
 
 .nav-links .nav-cta:hover {
-  color: #ffffff;
+  color: #0B0C0E;
 }
 
 /* Mobile nav toggle */
@@ -350,14 +350,14 @@ p + p { margin-top: 1em; }
 
 .btn-accent {
   background: var(--gradient-accent);
-  color: #ffffff;
+  color: #0B0C0E;
   border-color: transparent;
 }
 
 .btn-accent:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 32px var(--accent-glow);
-  color: #ffffff;
+  color: #0B0C0E;
 }
 
 .btn-accent:active {

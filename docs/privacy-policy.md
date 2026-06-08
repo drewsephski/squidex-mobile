@@ -51,4 +51,4 @@ You are responsible for:
 
 For support, use the project support channel:
 
-contact@arkaledge.com
+contact@drewsepeczi.xyz
