@@ -973,7 +973,289 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   10. Features Grid
+   10. Use Cases Section
+   ------------------------------------------- */
+.use-cases-section {
+  padding: 100px 0;
+  position: relative;
+}
+
+.use-cases-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+.use-cases-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.use-cases-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.use-case-card {
+  padding: 40px 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.use-case-card:hover {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3);
+}
+
+.use-case-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.use-case-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.use-case-title {
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.use-case-desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+
+/* -------------------------------------------
+   11. Demo Flow Section
+   ------------------------------------------- */
+.demo-section {
+  padding: 100px 0;
+  position: relative;
+}
+
+.demo-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+.demo-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.demo-flow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.demo-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 0 20px;
+  flex: 1;
+  min-width: 0;
+}
+
+.demo-step-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border-hover);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: all var(--transition-base);
+}
+
+.demo-step-icon-accent {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.demo-step-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.demo-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.demo-step-content strong {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.demo-step-content span {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.demo-arrow {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 18px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.demo-arrow svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+
+/* -------------------------------------------
+   12. Security Section
+   ------------------------------------------- */
+.security-section {
+  padding: 100px 0;
+  position: relative;
+}
+
+.security-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+.security-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+.security-card {
+  padding: 32px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+  align-items: center;
+}
+
+.security-card:hover {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.security-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.security-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.security-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.security-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+
+/* -------------------------------------------
+   13. Features Grid
    ------------------------------------------- */
 .features-section {
   padding: 100px 0;
@@ -1058,7 +1340,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   11. CTA Section
+   14. CTA Section
    ------------------------------------------- */
 .cta-section {
   padding: 120px 0;
@@ -1181,7 +1463,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   12. Footer
+   15. Footer
    ------------------------------------------- */
 .site-footer {
   padding: 48px 0;
@@ -1233,7 +1515,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   13. Legal Pages (shared content)
+   16. Legal Pages (shared content)
    ------------------------------------------- */
 .legal-page {
   padding: calc(var(--nav-height) + 48px) 0 64px;
@@ -1308,7 +1590,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   14. Scroll-triggered Reveals (Intersection Observer)
+   17. Scroll-triggered Reveals (Intersection Observer)
    ------------------------------------------- */
 .reveal {
   opacity: 0;
@@ -1342,7 +1624,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   15. Animations & Keyframes
+   18. Animations & Keyframes
    ------------------------------------------- */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
@@ -1395,7 +1677,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   16. Utility Classes
+   19. Utility Classes
    ------------------------------------------- */
 .text-center { text-align: center; }
 .sr-only {
@@ -1427,7 +1709,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   17. Responsive Breakpoints
+   20. Responsive Breakpoints
    ------------------------------------------- */
 
 /* Tablet & Small Desktop */
@@ -1512,6 +1794,36 @@ p + p { margin-top: 1em; }
   .cta-bg-glow {
     width: 100%;
     height: 400px;
+  }
+
+  /* Use cases */
+  .use-cases-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  /* Demo flow */
+  .demo-flow {
+    flex-wrap: nowrap;
+  }
+
+  .demo-step {
+    padding: 0 12px;
+  }
+
+  .demo-arrow {
+    display: flex;
+  }
+
+  .demo-arrow svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Security */
+  .security-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
   }
 }
 
@@ -1730,6 +2042,83 @@ p + p { margin-top: 1em; }
     padding: 24px 20px;
   }
 
+  /* Use cases */
+  .use-cases-section {
+    padding: 60px 0;
+  }
+
+  .use-cases-header {
+    margin-bottom: 40px;
+  }
+
+  .use-cases-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .use-case-card {
+    padding: 28px 24px;
+  }
+
+  /* Demo flow */
+  .demo-section {
+    padding: 60px 0;
+  }
+
+  .demo-header {
+    margin-bottom: 40px;
+  }
+
+  .demo-flow {
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .demo-step {
+    flex-direction: row;
+    text-align: left;
+    gap: 16px;
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .demo-step-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .demo-step-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .demo-step-content strong {
+    font-size: 0.95rem;
+  }
+
+  .demo-arrow {
+    display: none;
+  }
+
+  /* Security */
+  .security-section {
+    padding: 60px 0;
+  }
+
+  .security-header {
+    margin-bottom: 40px;
+  }
+
+  .security-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .security-card {
+    padding: 24px 20px;
+  }
+
   /* CTA */
   .cta-section {
     padding: 80px 0;
@@ -1882,7 +2271,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   18. Reduced Motion
+   21. Reduced Motion
    ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   *,

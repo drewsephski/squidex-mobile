@@ -3,24 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Squidex — AI coding tools, in your pocket</title>
+    <title>Squidex — Control your AI coding tools from your phone</title>
     <meta
       name="description"
-      content="Squidex is a mobile companion for Codex, OpenCode, and Cursor. Control your AI coding environment from your phone over a secure private bridge."
+      content="Approve AI code changes, review deployments, and control Cursor, Codex, and OpenCode from your phone over a secure private bridge."
     />
     <meta name="theme-color" content="#0B0C0E" />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Squidex — AI coding tools, in your pocket" />
-    <meta property="og:description" content="Control Codex, OpenCode, and Cursor from your phone over a secure private bridge." />
+    <meta property="og:title" content="Squidex — Control your AI coding tools from your phone" />
+    <meta property="og:description" content="Approve AI code changes, review deployments, and control Cursor, Codex, and OpenCode from your phone." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://squidex.app" />
     <meta property="og:image" content="https://squidex.app/images/squidex-social-poster-1200x675.png" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Squidex — AI coding tools, in your pocket" />
-    <meta name="twitter:description" content="Control Codex, OpenCode, and Cursor from your phone over a secure private bridge." />
+    <meta name="twitter:title" content="Squidex — Control your AI coding tools from your phone" />
+    <meta name="twitter:description" content="Approve AI code changes, review deployments, and control Cursor, Codex, and OpenCode from your phone." />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/images/squidex.png" sizes="128x128" />
@@ -67,7 +67,7 @@
       </div>
     </nav>
 
-    <!-- Hero Section -->
+    <!-- 1. Hero Section -->
     <section class="hero-section" aria-label="Hero">
       <div class="hero-bg-glow" aria-hidden="true"></div>
       <div class="container">
@@ -81,18 +81,19 @@
             In your pocket.
           </h1>
           <p class="hero-subtitle">
-            Control Codex, OpenCode, and Cursor from your phone over a secure private
-            bridge. Chat, approve, voice, and manage your coding workflow remotely.
+            Approve changes, review deployments, and control your AI coding
+            agents from anywhere. Your phone becomes the command center for
+            your development workflow.
           </p>
           <div class="hero-actions">
             <a href="/download/" class="btn btn-accent btn-lg">
-              Get started
+              Download free
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
               </svg>
             </a>
-            <a href="#how-it-works" class="btn btn-outline btn-lg">
-              How it works
+            <a href="#use-cases" class="btn btn-outline btn-lg">
+              See it in action
             </a>
           </div>
         </div>
@@ -117,13 +118,15 @@
                 </div>
               </div>
               <div class="phone-messages">
-                <div class="message message-user message-delay-1">Build a REST API with Node.js</div>
-                <div class="message message-bot message-delay-2">
-                  <strong>I'll scaffold that.</strong> Creating an Express API with routes, controllers, and middleware.
+                <div class="message message-bot message-delay-1">
+                  <strong>Deploy failed.</strong> Error in auth middleware. I have a fix ready — approve to apply.
                 </div>
-                <div class="message message-user message-delay-3">Add authentication</div>
+                <div class="message message-user message-delay-2">Approve &amp; deploy</div>
+                <div class="message message-bot message-delay-3">
+                  Fix applied. Tests passing. Deploying now.
+                </div>
                 <div class="message message-bot message-delay-4">
-                  Adding JWT auth with <code>jsonwebtoken</code> and middleware chain.
+                  ✓ Deployed successfully
                   <div class="typing-indicator">
                     <span class="dot"></span>
                     <span class="dot"></span>
@@ -147,39 +150,327 @@
       </div>
     </section>
 
-    <!-- Engine Support Section -->
-    <section class="engines-section" aria-label="Supported engines">
-      <div class="container text-center">
-        <span class="section-label">Supported engines</span>
-        <h2>Works with your favorite AI coding tools</h2>
-        <p class="text-secondary" style="margin-top: 12px; max-width: 540px; margin-left: auto; margin-right: auto;">
-          Squidex connects to the tools you already use through a single, secure bridge on your machine.
-        </p>
-        <div class="engines-grid reveal-stagger" id="engines-grid">
-          <article class="engine-card reveal">
-            <img src="/images/engine-codex.png" alt="Codex" width="64" height="64" />
-            <h3 class="engine-name">Codex</h3>
-            <p class="engine-desc">Full Codex CLI integration — send prompts, review outputs, and manage sessions from your phone.</p>
+    <!-- 2. Use Cases Section -->
+    <section class="use-cases-section" id="use-cases" aria-label="Use cases">
+      <div class="container">
+        <div class="use-cases-header">
+          <span class="section-label">Use cases</span>
+          <h2>Your AI agent is working.<br />You don't have to be at your desk.</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto;">
+            Squidex turns your phone into a remote control for your coding workflow.
+          </p>
+        </div>
+        <div class="use-cases-grid reveal-stagger" id="use-cases-grid">
+          <article class="use-case-card reveal">
+            <div class="use-case-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </div>
+            <h3 class="use-case-title">Approve from anywhere</h3>
+            <p class="use-case-desc">
+              Your production deploy just failed while you're at dinner.
+              Pull out your phone, review the AI's fix, approve it, and
+              watch it ship — before the check arrives.
+            </p>
           </article>
-          <article class="engine-card reveal">
-            <img src="/images/engine-opencode.png" alt="OpenCode" width="64" height="64" />
-            <h3 class="engine-name">OpenCode</h3>
-            <p class="engine-desc">Seamless OpenCode support with real-time streaming, approvals, and voice input capabilities.</p>
+          <article class="use-case-card reveal">
+            <div class="use-case-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </div>
+            <h3 class="use-case-title">Code by voice</h3>
+            <p class="use-case-desc">
+              Walking the dog and have an idea? Dictate a prompt, send it
+              to your AI agent, and watch the code stream in. No need to
+              rush back to your keyboard.
+            </p>
           </article>
-          <article class="engine-card reveal">
-            <img src="/images/engine-cursor.png" alt="Cursor" width="64" height="64" />
-            <h3 class="engine-name">Cursor</h3>
-            <p class="engine-desc">Extend Cursor AI's reach to your mobile — approve edits, run commands, and stay in the loop.</p>
+          <article class="use-case-card reveal">
+            <div class="use-case-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+            <h3 class="use-case-title">Ship on the go</h3>
+            <p class="use-case-desc">
+              Watch your AI agent build features in real time. Review diffs,
+              approve commits, and deploy — all from your pocket, wherever
+              you are.
+            </p>
           </article>
         </div>
       </div>
     </section>
 
-    <!-- How It Works Section -->
-    <section class="steps-section" id="how-it-works" aria-label="How it works">
+    <!-- 3. Demo Flow Section -->
+    <section class="demo-section" aria-label="How it works">
+      <div class="container">
+        <div class="demo-header">
+          <span class="section-label">How it works</span>
+          <h2>Watch Squidex fix code from your phone</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 520px; margin-left: auto; margin-right: auto;">
+            Your AI agent codes on your machine. Squidex keeps you in the loop — no matter where you are.
+          </p>
+        </div>
+        <div class="demo-flow">
+          <div class="demo-step">
+            <div class="demo-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <div class="demo-step-content">
+              <strong>Agent codes</strong>
+              <span>Your AI agent runs on your desktop, making changes and running tests.</span>
+            </div>
+          </div>
+          <div class="demo-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <div class="demo-step-content">
+              <strong>Phone alerts you</strong>
+              <span>You get a notification when the agent needs approval or hits a decision point.</span>
+            </div>
+          </div>
+          <div class="demo-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 12l2 2 4-4" />
+                <circle cx="12" cy="12" r="10" />
+              </svg>
+            </div>
+            <div class="demo-step-content">
+              <strong>Review &amp; approve</strong>
+              <span>See the diff, confirm the change, and send the go-ahead from your phone.</span>
+            </div>
+          </div>
+          <div class="demo-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-icon demo-step-icon-accent">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            </div>
+            <div class="demo-step-content">
+              <strong>Shipped</strong>
+              <span>Agent continues working. Changes are committed. Deploy goes out. You stay in control.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Works With Section (formerly Engines) -->
+    <section class="engines-section" aria-label="Supported engines">
+      <div class="container text-center">
+        <span class="section-label">Works with</span>
+        <h2>Control every agent from one app</h2>
+        <p class="text-secondary" style="margin-top: 12px; max-width: 580px; margin-left: auto; margin-right: auto;">
+          No vendor lock-in. One mobile app connects to Codex, OpenCode, and Cursor through a single secure bridge on your machine.
+        </p>
+        <div class="engines-grid reveal-stagger" id="engines-grid">
+          <article class="engine-card reveal">
+            <img src="/images/engine-codex.png" alt="Codex" width="64" height="64" />
+            <h3 class="engine-name">Codex</h3>
+            <p class="engine-desc">Full CLI integration — send prompts, review outputs, and manage sessions from your phone.</p>
+          </article>
+          <article class="engine-card reveal">
+            <img src="/images/engine-opencode.png" alt="OpenCode" width="64" height="64" />
+            <h3 class="engine-name">OpenCode</h3>
+            <p class="engine-desc">Real-time streaming, approvals, and voice input. All features, zero compromises.</p>
+          </article>
+          <article class="engine-card reveal">
+            <img src="/images/engine-cursor.png" alt="Cursor" width="64" height="64" />
+            <h3 class="engine-name">Cursor</h3>
+            <p class="engine-desc">Extend Cursor AI's reach to your phone — approve edits, run commands, stay in the loop.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Security Section -->
+    <section class="security-section" aria-label="Security">
+      <div class="container">
+        <div class="security-header">
+          <span class="section-label">Security</span>
+          <h2>Private by default</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto;">
+            Your code never touches our servers. Squidex runs a local bridge on your machine — no cloud relay, no third-party access.
+          </p>
+        </div>
+        <div class="security-grid reveal-stagger" id="security-grid">
+          <article class="security-card reveal">
+            <div class="security-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <h3 class="security-title">Local bridge</h3>
+            <p class="security-desc">
+              The bridge runs on your machine, on your network. Nothing goes through our servers. Your code stays where it belongs.
+            </p>
+          </article>
+          <article class="security-card reveal">
+            <div class="security-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <h3 class="security-title">Encrypted connection</h3>
+            <p class="security-desc">
+              All communication between your phone and bridge is encrypted. Pair it with Tailscale for an additional layer of network security.
+            </p>
+          </article>
+          <article class="security-card reveal">
+            <div class="security-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20.91 14.08a10 10 0 0 0-3.13-8.35A10 10 0 0 0 5.76 3.34a10 10 0 0 0-2.67 14.4" />
+                <path d="M12 2v4" />
+                <circle cx="12" cy="16" r="1" />
+                <path d="M10 20h4" />
+              </svg>
+            </div>
+            <h3 class="security-title">You control access</h3>
+            <p class="security-desc">
+              Configure auth tokens, restrict allowed commands, and run the bridge however you want. No defaults that compromise your machine.
+            </p>
+          </article>
+          <article class="security-card reveal">
+            <div class="security-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            </div>
+            <h3 class="security-title">Open source</h3>
+            <p class="security-desc">
+              Every line of code is public. Audit it, fork it, contribute to it. No black boxes between you and your machine.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Features Section -->
+    <section class="features-section" aria-label="Features">
+      <div class="container">
+        <div class="features-header">
+          <span class="section-label">Capabilities</span>
+          <h2>Everything you need, remotely</h2>
+          <p class="text-secondary" style="margin-top: 12px; max-width: 520px; margin-left: auto; margin-right: auto;">
+            Squidex brings the full coding workflow to your phone without sacrificing control or context.
+          </p>
+        </div>
+        <div class="features-grid reveal-stagger" id="features-grid">
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Real-time streaming</h3>
+            <p class="feature-desc">
+              Watch AI responses stream in live. No polling, no refresh — just instant updates from your coding assistant.
+            </p>
+          </article>
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Approvals &amp; clarifications</h3>
+            <p class="feature-desc">
+              Review and approve every action. Clarify intent and stay in control of changes from the palm of your hand.
+            </p>
+          </article>
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Voice input</h3>
+            <p class="feature-desc">
+              Dictate prompts with voice-to-text. Keep your flow going without breaking focus to type on a small screen.
+            </p>
+          </article>
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Git operations</h3>
+            <p class="feature-desc">
+              Stage, commit, push, and review diffs. Full Git control from your phone when you are away from your desk.
+            </p>
+          </article>
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Terminal access</h3>
+            <p class="feature-desc">
+              Execute commands, run scripts, and monitor output from a mobile terminal — securely proxied through your bridge.
+            </p>
+          </article>
+          <article class="feature-card reveal">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Local web preview</h3>
+            <p class="feature-desc">
+              Preview rendered output, logs, and web content from your local dev environment right on your phone.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Setup Section -->
+    <section class="steps-section" id="setup" aria-label="Setup">
       <div class="container">
         <div class="steps-header">
-          <span class="section-label">How it works</span>
+          <span class="section-label">Setup</span>
           <h2>Up and running in three steps</h2>
           <p class="text-secondary" style="margin-top: 12px; max-width: 480px; margin-left: auto; margin-right: auto;">
             No cloud accounts, no subscriptions. Just your machine, your bridge, and your phone.
@@ -220,108 +511,7 @@
       </div>
     </section>
 
-    <!-- Features Section -->
-    <section class="features-section" aria-label="Features">
-      <div class="container">
-        <div class="features-header">
-          <span class="section-label">Capabilities</span>
-          <h2>Everything you need, remotely</h2>
-          <p class="text-secondary" style="margin-top: 12px; max-width: 520px; margin-left: auto; margin-right: auto;">
-            Squidex brings the full coding workflow to your phone without sacrificing control or context.
-          </p>
-        </div>
-        <div class="features-grid reveal-stagger" id="features-grid">
-          <!-- Real-time streaming -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Real-time streaming</h3>
-            <p class="feature-desc">
-              Watch AI responses stream in live. No polling, no refresh — just instant updates from your coding assistant.
-            </p>
-          </article>
-
-          <!-- Approvals & clarifications -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                <path d="m9 12 2 2 4-4" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Approvals &amp; clarifications</h3>
-            <p class="feature-desc">
-              Review and approve every action. Clarify intent and stay in control of changes from the palm of your hand.
-            </p>
-          </article>
-
-          <!-- Voice input -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="9" y="2" width="6" height="12" rx="3" />
-                <path d="M5 10a7 7 0 0 0 14 0" />
-                <line x1="12" y1="19" x2="12" y2="22" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Voice input</h3>
-            <p class="feature-desc">
-              Dictate prompts with voice-to-text. Keep your flow going without breaking focus to type on a small screen.
-            </p>
-          </article>
-
-          <!-- Git operations -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <line x1="6" y1="3" x2="6" y2="15" />
-                <circle cx="18" cy="6" r="3" />
-                <circle cx="6" cy="18" r="3" />
-                <path d="M18 9a9 9 0 0 1-9 9" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Git operations</h3>
-            <p class="feature-desc">
-              Stage, commit, push, and review diffs. Full Git control from your phone when you are away from your desk.
-            </p>
-          </article>
-
-          <!-- Terminal access -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <polyline points="4 17 10 11 4 5" />
-                <line x1="12" y1="19" x2="20" y2="19" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Terminal access</h3>
-            <p class="feature-desc">
-              Execute commands, run scripts, and monitor output from a mobile terminal — securely proxied through your bridge.
-            </p>
-          </article>
-
-          <!-- Local web preview -->
-          <article class="feature-card reveal">
-            <div class="feature-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="2" y="3" width="20" height="14" rx="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Local web preview</h3>
-            <p class="feature-desc">
-              Preview rendered output, logs, and web content from your local dev environment right on your phone.
-            </p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA Section -->
+    <!-- 8. CTA Section -->
     <section class="cta-section" aria-label="Get started">
       <div class="cta-bg-glow" aria-hidden="true"></div>
       <div class="content-slim">
@@ -335,13 +525,13 @@
         </p>
         <div class="cta-actions">
           <a href="/download/" class="btn btn-accent btn-lg">
-            Get started for free
+            Download free
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
             </svg>
           </a>
-          <a href="#how-it-works" class="btn btn-outline btn-lg">
-            How it works
+          <a href="#setup" class="btn btn-outline btn-lg">
+            Setup guide
           </a>
         </div>
         <div class="store-badges" style="margin-top: 24px;">
