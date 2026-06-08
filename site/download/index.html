@@ -32,6 +32,11 @@
     <link rel="stylesheet" href="/styles.css" />
 
     <style>
+      /* Platform-aware visibility */
+      .show-apple { display: none; }
+      .platform-apple .show-android { display: none; }
+      .platform-apple .show-apple { display: flex; }
+
       .download-hero {
         padding: 120px 0 60px;
         text-align: center;
@@ -326,17 +331,34 @@
           <span class="platform-tag android">Android</span>
         </div>
         <p>Install directly on any Android device. No Play Store required — just download and sideload. Built automatically from the latest commit.</p>
-        <a href="/download/squidex.apk" class="btn btn-accent" download>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 8px;">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download APK
-        </a>
-        <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-          Automatically built from the latest commit.
-        </p>
+
+        <!-- Android: show download button -->
+        <div class="show-android">
+          <a href="/download/squidex.apk" class="btn btn-accent" download>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 8px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download APK
+          </a>
+          <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
+            Automatically built from the latest commit.
+          </p>
+        </div>
+
+        <!-- Apple: show instructions instead -->
+        <div class="show-apple" style="flex-direction: column; gap: 12px;">
+          <p style="margin: 0; font-size: 0.9rem; color: var(--text-secondary);">
+            APK is for Android only. On iPhone or iPad, build from source with the iOS steps below.
+          </p>
+          <a href="#ios-card" class="btn btn-outline" style="align-self: flex-start;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px;">
+              <path d="M7 17l9.2-9.2M17 17V7H7" />
+            </svg>
+            Jump to iOS setup
+          </a>
+        </div>
         <p style="margin-top: 12px; font-size: 0.85rem;">
           Or build it yourself:
         </p>
@@ -345,12 +367,12 @@ cd squidex-mobile
 npm install
 cd apps/mobile
 npx expo prebuild --platform android
-cd android && ./gradlew assembleRelease</span>
-        <p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">Requires Android SDK, JDK 17+, and a local Android build environment.</p>
+cd android && ./gradlew assembleDebug</span>
+        <p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">Requires Android SDK, JDK 17+, and a local Android build environment. For a signed release build, use EAS instead: <code>eas build --platform android --profile production</code></p>
       </article>
 
       <!-- iOS -->
-      <article class="download-card">
+      <article class="download-card" id="ios-card">
         <div class="download-card-header">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
@@ -453,6 +475,12 @@ cd android && ./gradlew assembleRelease</span>
             }
           });
         }
+
+        // Platform detection: add class to body for Apple vs non-Apple
+        var isApple = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') ||
+          (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 2) ||
+          navigator.userAgent.includes('Mac OS X');
+        document.body.classList.add(isApple ? 'platform-apple' : 'platform-android');
 
         // Copy-to-clipboard for code blocks
         window.copyCode = function(el) {
