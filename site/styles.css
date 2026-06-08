@@ -271,6 +271,11 @@ p + p { margin-top: 1em; }
 
 .nav-links .nav-cta {
   margin-left: 12px;
+  color: #ffffff;
+}
+
+.nav-links .nav-cta:hover {
+  color: #ffffff;
 }
 
 /* Mobile nav toggle */
@@ -817,21 +822,9 @@ p + p { margin-top: 1em; }
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3);
 }
 
-.engine-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  overflow: hidden;
-}
-
-.engine-icon img {
-  width: 32px;
-  height: 32px;
+.engine-card img {
+  width: 64px;
+  height: 64px;
   object-fit: contain;
 }
 
@@ -1212,10 +1205,10 @@ p + p { margin-top: 1em; }
 }
 
 .footer-brand img {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  opacity: 0.5;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  opacity: 0.7;
 }
 
 .footer-links {
