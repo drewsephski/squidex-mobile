@@ -580,9 +580,7 @@ p + p { margin-top: 1em; }
   position: relative;
   width: 320px;
   height: 640px;
-  background: rgba(15, 15, 19, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(15, 15, 19, 1);
   border-radius: 44px;
   border: 1px solid rgba(255, 245, 235, 0.10);
   box-shadow:
@@ -599,6 +597,18 @@ p + p { margin-top: 1em; }
 
 .phone-mockup:hover {
   transform: perspective(1000px) rotateY(-1deg) rotateX(1deg);
+}
+
+/* Video fill inside phone mockup */
+.phone-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 44px;
+  pointer-events: none;
 }
 
 /* Screen reflection */
