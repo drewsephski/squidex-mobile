@@ -69,20 +69,31 @@ function syncVersions() {
   appConfig.expo.version = version;
   writeJson(appJsonPath, appConfig);
 
-  updateTextFile('apps/mobile/ios/SquidexMobile/Info.plist', version, (current) =>
-    current.replace(
-      /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<]+)(<\/string>)/,
-      `$1${version}$3`
-    )
-  );
+  // Native iOS/Android files only exist after `expo prebuild`.
+  // Skip gracefully if they haven't been generated yet.
+  const iosPlist = 'apps/mobile/ios/SquidexMobile/Info.plist';
+  if (fs.existsSync(path.join(rootDir, iosPlist))) {
+    updateTextFile(iosPlist, version, (current) =>
+      current.replace(
+        /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<]+)(<\/string>)/,
+        `$1${version}$3`
+      )
+    );
+  }
 
-  updateTextFile('apps/mobile/ios/SquidexMobile.xcodeproj/project.pbxproj', version, (current) =>
-    current.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`)
-  );
+  const iosPbxproj = 'apps/mobile/ios/SquidexMobile.xcodeproj/project.pbxproj';
+  if (fs.existsSync(path.join(rootDir, iosPbxproj))) {
+    updateTextFile(iosPbxproj, version, (current) =>
+      current.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`)
+    );
+  }
 
-  updateTextFile('apps/mobile/android/app/build.gradle', version, (current) =>
-    current.replace(/versionName\s+"[^"]+"/, `versionName "${version}"`)
-  );
+  const androidGradle = 'apps/mobile/android/app/build.gradle';
+  if (fs.existsSync(path.join(rootDir, androidGradle))) {
+    updateTextFile(androidGradle, version, (current) =>
+      current.replace(/versionName\s+"[^"]+"/, `versionName "${version}"`)
+    );
+  }
 
   console.log(`Synchronized app and bridge versions to ${version}`);
 }

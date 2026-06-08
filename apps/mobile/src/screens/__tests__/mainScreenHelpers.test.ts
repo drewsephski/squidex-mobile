@@ -39,9 +39,9 @@ describe('mainScreenHelpers', () => {
           stderr: '',
           cloned: false,
         },
-        'Mohit-Patil/launchkit'
+        'user/repo'
       )
-    ).toBe('Git clone failed for Mohit-Patil/launchkit.');
+    ).toBe('Git clone failed for user/repo.');
   });
 
   it('extracts nested Codex failure details from live event payloads', () => {

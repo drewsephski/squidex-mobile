@@ -117,9 +117,9 @@ Use `npm run setup:wizard -- --no-start` if you only want to write config.
 
 ## Docs
 
-- Setup + operations: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/setup-and-operations.md>
-- Troubleshooting: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/troubleshooting.md>
-- Realtime sync limits/mitigations: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/realtime-streaming-limitations.md>
-- Voice transcription internals: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/voice-transcription.md>
-- EAS builds: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/eas-builds.md>
-- Open-source/license notes: <https://github.com/Mohit-Patil/squidex-mobile/blob/main/docs/open-source-license-requirements.md>
+- Setup + operations: `docs/setup-and-operations.md`
+- Troubleshooting: `docs/troubleshooting.md`
+- Realtime sync limits/mitigations: `docs/realtime-streaming-limitations.md`
+- Voice transcription internals: `docs/voice-transcription.md`
+- EAS builds: `docs/eas-builds.md`
+- Open-source/license notes: `docs/open-source-license-requirements.md`

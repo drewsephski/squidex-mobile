@@ -253,7 +253,7 @@
           <a href="/support/">Support</a>
           <a href="/privacy/">Privacy</a>
           <a href="/terms/">Terms</a>
-          <a href="https://github.com/drewsephski/squidex-mobile" class="btn btn-accent nav-cta">GitHub</a>
+          <a href="/" class="btn btn-accent nav-cta">Home</a>
         </div>
         <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
           <span></span>
@@ -276,11 +276,7 @@
     <div class="content-slim" style="text-align: center; padding-bottom: 8px;">
       <p class="text-secondary" style="font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;">
         <span>Build status:</span>
-        <a href="https://github.com/drewsephski/squidex-mobile/actions/workflows/build-apk.yml" style="display: inline-flex; align-items: center;">
-          <img src="https://github.com/drewsephski/squidex-mobile/actions/workflows/build-apk.yml/badge.svg" alt="Build status" style="height: 20px; border-radius: 4px;" />
-        </a>
-        <span>&middot;</span>
-        <a href="https://github.com/drewsephski/squidex-mobile/releases/tag/latest" style="color: var(--accent);">Latest release</a>
+        <span class="text-muted" style="font-size: 0.85rem;">Latest build from main branch</span>
       </p>
     </div>
 
@@ -308,17 +304,18 @@
           Download APK
         </a>
         <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);">
-          Latest build from main branch &middot; <a href="https://github.com/drewsephski/squidex-mobile/actions/workflows/build-apk.yml" style="color: var(--accent);">View build status</a>
+          Automatically built from the latest commit.
         </p>
         <p style="margin-top: 12px; font-size: 0.85rem;">
           Or build it yourself:
         </p>
-        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">git clone https://github.com/drewsephski/squidex-mobile.git
-cd squidex-mobile
+        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">git clone https://github.com/drewsephski/squidex.git
+cd squidex
 npm install
 cd apps/mobile
 npx expo prebuild --platform android
 cd android && ./gradlew assembleRelease</span>
+        <p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">Requires Android SDK, JDK 17+, and a local Android build environment.</p>
       </article>
 
       <!-- iOS -->
@@ -339,8 +336,8 @@ cd android && ./gradlew assembleRelease</span>
         </div>
         <h4 style="margin: 16px 0 8px; font-size: 0.95rem; color: var(--text);">Build steps</h4>
         <ol class="build-steps">
-          <li><code>git clone https://github.com/drewsephski/squidex-mobile.git</code></li>
-          <li><code>cd squidex-mobile && npm install</code></li>
+          <li><code>git clone the Squidex repository</code></li>
+          <li><code>cd squidex && npm install</code></li>
           <li><code>npx expo run:ios</code></li>
           <li>In Xcode, set your team to your free Apple ID (signing &amp; capabilities)</li>
           <li>Build to your connected iPhone (7-day certificate)</li>
@@ -369,24 +366,6 @@ cd android && ./gradlew assembleRelease</span>
         </p>
       </article>
 
-      <!-- GitHub -->
-      <article class="download-card">
-        <div class="download-card-header">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
-          </svg>
-          <h3>Source code</h3>
-          <span class="platform-tag cli">GitHub</span>
-        </div>
-        <p>Browse the source, open issues, or contribute on GitHub. MIT licensed.</p>
-        <a href="https://github.com/drewsephski/squidex-mobile" class="btn btn-outline">
-          View on GitHub
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: 6px;">
-            <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
-          </svg>
-        </a>
-      </article>
-
       <p class="text-secondary" style="text-align: center; font-size: 0.85rem; margin-top: 8px;">
         <a href="/" class="back-link">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
@@ -408,7 +387,6 @@ cd android && ./gradlew assembleRelease</span>
             <a href="/support/">Support</a>
             <a href="/privacy/">Privacy</a>
             <a href="/terms/">Terms</a>
-            <a href="https://github.com/drewsephski/squidex-mobile">GitHub</a>
           </nav>
           <span class="footer-copy">Built for developers who code anywhere.</span>
         </div>

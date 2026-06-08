@@ -30,4 +30,4 @@ The software is provided on an as-is basis. You assume responsibility for how it
 
 For support, use the project support channel:
 
-https://github.com/Mohit-Patil/squidex-mobile/issues
+contact@arkaledge.com
