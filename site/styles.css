@@ -580,14 +580,13 @@ p + p { margin-top: 1em; }
   position: relative;
   width: 320px;
   height: 640px;
-  background: rgba(15, 15, 19, 1);
+  background: transparent;
   border-radius: 44px;
   border: 1px solid rgba(255, 245, 235, 0.10);
   box-shadow:
     0 0 0 1px rgba(255, 245, 235, 0.04),
     0 40px 80px rgba(0, 0, 0, 0.7),
-    0 0 160px rgba(232, 173, 85, 0.08),
-    inset 0 1px 0 rgba(255, 245, 235, 0.04);
+    0 0 160px rgba(232, 173, 85, 0.08);
   overflow: hidden;
   display: flex;
   flex-direction: column;
