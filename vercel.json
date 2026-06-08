@@ -1,5 +1,6 @@
 {
   "framework": null,
   "outputDirectory": "site",
-  "buildCommand": null
+  "buildCommand": "",
+  "installCommand": ""
 }
