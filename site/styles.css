@@ -345,14 +345,14 @@ p + p { margin-top: 1em; }
 
 .btn-accent {
   background: var(--gradient-accent);
-  color: #0B0C0E;
+  color: #ffffff;
   border-color: transparent;
 }
 
 .btn-accent:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 32px var(--accent-glow);
-  color: #0B0C0E;
+  color: #ffffff;
 }
 
 .btn-accent:active {
@@ -1071,7 +1071,6 @@ p + p { margin-top: 1em; }
   padding: 120px 0;
   position: relative;
   text-align: center;
-  overflow: hidden;
 }
 
 .cta-section::before {
@@ -1107,8 +1106,7 @@ p + p { margin-top: 1em; }
 .cta-title {
   font-size: clamp(2rem, 4vw, 3rem);
   max-width: 600px;
-  line-height: 1.2;
-  padding-bottom: 4px;
+  line-height: 1.3;
 }
 
 .cta-subtitle {
