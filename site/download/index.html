@@ -217,16 +217,47 @@
 
       @media (max-width: 640px) {
         .download-hero {
-          padding: 100px 0 40px;
+          padding: 100px 0 32px;
+        }
+        .download-hero h1 {
+          font-size: clamp(1.6rem, 7vw, 2.2rem);
+        }
+        .download-options {
+          gap: 16px;
         }
         .download-card {
-          padding: 24px;
+          padding: 20px;
         }
         .download-card-header {
           flex-wrap: wrap;
         }
         .platform-tag {
           margin-left: 0;
+        }
+        .code-block {
+          padding: 12px 14px;
+          font-size: 0.78rem;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          word-break: break-word;
+          white-space: pre-wrap;
+          max-width: 100%;
+        }
+        .build-steps li {
+          font-size: 0.82rem;
+          word-break: break-word;
+        }
+        .build-steps li code {
+          font-size: 0.75rem;
+          word-break: break-all;
+        }
+        .download-card .btn {
+          width: 100%;
+          justify-content: center;
+        }
+        .prereq-box {
+          padding: 12px 14px;
+          font-size: 0.8rem;
         }
       }
     </style>
@@ -309,8 +340,8 @@
         <p style="margin-top: 12px; font-size: 0.85rem;">
           Or build it yourself:
         </p>
-        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">git clone https://github.com/drewsephski/squidex.git
-cd squidex
+        <span class="code-block" onclick="copyCode(this)" role="button" tabindex="0">git clone https://github.com/drewsephski/squidex-mobile.git
+cd squidex-mobile
 npm install
 cd apps/mobile
 npx expo prebuild --platform android
@@ -337,7 +368,7 @@ cd android && ./gradlew assembleRelease</span>
         <h4 style="margin: 16px 0 8px; font-size: 0.95rem; color: var(--text);">Build steps</h4>
         <ol class="build-steps">
           <li><code>git clone the Squidex repository</code></li>
-          <li><code>cd squidex && npm install</code></li>
+          <li><code>cd squidex-mobile && npm install</code></li>
           <li><code>npx expo run:ios</code></li>
           <li>In Xcode, set your team to your free Apple ID (signing &amp; capabilities)</li>
           <li>Build to your connected iPhone (7-day certificate)</li>
