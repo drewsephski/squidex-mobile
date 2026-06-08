@@ -610,6 +610,14 @@ p + p { margin-top: 1em; }
   pointer-events: none;
 }
 
+/* Dark screen placeholder inside phone frame */
+.phone-screen-dark {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #0F1115 0%, #0C0D0F 100%);
+  border-radius: 44px;
+}
+
 /* Screen reflection */
 .phone-mockup::after {
   content: '';
@@ -855,7 +863,39 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   8. Engine Support Section
+   8. Demo Video Section
+   ------------------------------------------- */
+.demo-video-section {
+  padding: 0 0 120px;
+  text-align: center;
+}
+
+.demo-video-section .section-label {
+  margin-bottom: 32px;
+}
+
+.demo-video-wrapper {
+  max-width: 900px;
+  margin: 0 auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid rgba(255, 245, 235, 0.08);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.5),
+    0 0 48px rgba(232, 173, 85, 0.04);
+  line-height: 0;
+}
+
+.demo-video-wrapper video {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #0C0D0F;
+}
+
+
+/* -------------------------------------------
+   9. Engine Support Section
    ------------------------------------------- */
 .engines-section {
   padding: 120px 0;
@@ -940,7 +980,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   9. How It Works (Steps)
+   10. How It Works (Steps)
    ------------------------------------------- */
 .steps-section {
   padding: 100px 0;
@@ -1070,7 +1110,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   10. Use Cases Section
+   11. Use Cases Section
    ------------------------------------------- */
 .use-cases-section {
   padding: 120px 0;
@@ -1174,7 +1214,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   11. Demo Flow Section
+   12. Demo Flow Section
    ------------------------------------------- */
 .demo-section {
   padding: 120px 0;
@@ -1313,7 +1353,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   12. Security Section
+   13. Security Section
    ------------------------------------------- */
 .security-section {
   padding: 120px 0;
@@ -1402,7 +1442,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   13. Features Grid
+   14. Features Grid
    ------------------------------------------- */
 .features-section {
   padding: 120px 0;
@@ -1489,7 +1529,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   14. CTA Section
+   15. CTA Section
    ------------------------------------------- */
 .cta-section {
   padding: 120px 0;
@@ -1612,7 +1652,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   15. Footer
+   16. Footer
    ------------------------------------------- */
 .site-footer {
   padding: 48px 0;
@@ -1664,7 +1704,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   16. Legal Pages (shared content)
+   17. Legal Pages (shared content)
    ------------------------------------------- */
 .legal-page {
   padding: calc(var(--nav-height) + 48px) 0 64px;
@@ -1739,7 +1779,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   17. Scroll-triggered Reveals (Intersection Observer)
+   18. Scroll-triggered Reveals (Intersection Observer)
    ------------------------------------------- */
 .reveal {
   opacity: 0;
@@ -1775,7 +1815,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   18. Animations & Keyframes
+   19. Animations & Keyframes
    ------------------------------------------- */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
@@ -1843,7 +1883,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   19. Utility Classes
+   20. Utility Classes
    ------------------------------------------- */
 .text-center { text-align: center; }
 .sr-only {
@@ -1875,7 +1915,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   20. Responsive Breakpoints
+   21. Responsive Breakpoints
    ------------------------------------------- */
 
 /* Tablet & Small Desktop */
@@ -1995,6 +2035,11 @@ p + p { margin-top: 1em; }
   .security-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 16px;
+  }
+
+  /* Demo video */
+  .demo-video-wrapper {
+    max-width: 100%;
   }
 }
 
@@ -2295,6 +2340,16 @@ p + p { margin-top: 1em; }
     padding: 24px 20px;
   }
 
+  /* Demo video */
+  .demo-video-section {
+    padding: 0 0 60px;
+  }
+
+  .demo-video-wrapper {
+    border-radius: var(--radius-md);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  }
+
   /* CTA */
   .cta-section {
     padding: 80px 0;
@@ -2452,7 +2507,7 @@ p + p { margin-top: 1em; }
 
 
 /* -------------------------------------------
-   21. Reduced Motion
+   22. Reduced Motion
    ------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   *,
